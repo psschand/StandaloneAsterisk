@@ -1,0 +1,35 @@
+-- Migration script to convert users.id from VARCHAR(36) to BIGINT
+-- This runs after 01-init.sql but before 03-multi-tenant-schema.sql
+
+USE callcenter;
+
+-- Drop dependent tables first
+DROP TABLE IF EXISTS websocket_sessions;
+DROP TABLE IF EXISTS agent_states;
+DROP TABLE IF EXISTS call_recordings;
+DROP TABLE IF EXISTS cdr;
+DROP TABLE IF EXISTS sms_messages;
+DROP TABLE IF EXISTS user_roles;
+DROP TABLE IF EXISTS agents;
+
+-- Drop and recreate users table with BIGINT id
+DROP TABLE IF EXISTS users;
+
+CREATE TABLE users (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  first_name VARCHAR(100),
+  last_name VARCHAR(100),
+  phone VARCHAR(32),
+  status ENUM('active','inactive','suspended') DEFAULT 'active',
+  email_verified BOOLEAN DEFAULT FALSE,
+  last_login_at TIMESTAMP NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_email (email),
+  INDEX idx_status (status),
+  INDEX idx_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SELECT 'Users table migrated to BIGINT successfully!' as status;

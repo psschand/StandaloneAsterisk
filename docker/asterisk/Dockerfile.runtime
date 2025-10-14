@@ -1,0 +1,30 @@
+FROM call-center-asterisk:arm64
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Install runtime ODBC driver and utilities (include netcat for entrypoint wait)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+    odbc-mariadb \
+    unixodbc \
+    odbcinst \
+    libodbc1 \
+    procps \
+    netcat-openbsd \
+    ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY entrypoint-runtime.sh /entrypoint-runtime.sh
+COPY ast_logescalator.safe /var/lib/asterisk/scripts/ast_logescalator
+COPY odbc.ini /etc/odbc.ini
+
+RUN chmod +x /entrypoint-runtime.sh /var/lib/asterisk/scripts/ast_logescalator
+
+# Ensure 'asterisk' user exists and owns typical runtime directories
+RUN addgroup --system asterisk || true \
+ && adduser --system --ingroup asterisk --home /var/lib/asterisk asterisk || true \
+ && mkdir -p /etc/asterisk /var/spool/asterisk /var/lib/asterisk /var/log/asterisk \
+ && chown -R asterisk:asterisk /etc/asterisk /var/spool/asterisk /var/lib/asterisk /var/log/asterisk || true
+
+ENTRYPOINT ["/entrypoint-runtime.sh"]
+CMD ["/usr/sbin/asterisk", "-f", "-U", "asterisk"]

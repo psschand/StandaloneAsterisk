@@ -1,0 +1,78 @@
+# Dockerfile to build Asterisk from source for linux/arm64
+# - Builds Asterisk (master) with bundled PJProject, ODBC, PJSIP, ARI and sorcery support
+# - Intended for use with docker buildx for cross-arch builds
+
+ARG BASE_IMAGE=debian:bookworm-slim
+FROM ${BASE_IMAGE}
+
+ARG ASTERISK_GIT=https://github.com/asterisk/asterisk.git
+ARG ASTERISK_BRANCH=master
+ARG DEBIAN_FRONTEND=noninteractive
+
+ENV ASTERISK_SRC=/usr/src/asterisk
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    aptitude \
+    gnupg \
+    wget \
+    curl \
+    git \
+    build-essential \
+    autoconf \
+    automake \
+    libtool \
+    pkg-config \
+   libxml2-dev \
+   libncurses-dev \
+   uuid-dev \
+   libsqlite3-dev \
+   libssl-dev \
+   libedit-dev \
+   unixodbc-dev \
+   unixodbc \
+   libjansson-dev \
+   libsrtp2-dev \
+   libjwt-dev \
+   gawk \
+   python3 \
+    libpcre3-dev \
+    liburiparser-dev \
+    libcurl4-openssl-dev \
+    libmariadb-dev-compat \
+    libmariadb-dev \
+    pkgconf \
+    ca-certificates \
+    tzdata \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /usr/src
+
+# Clone Asterisk source
+RUN git clone --depth 1 --branch ${ASTERISK_BRANCH} ${ASTERISK_GIT} ${ASTERISK_SRC}
+
+WORKDIR ${ASTERISK_SRC}
+
+# Prepare and build Asterisk. We enable the bundled pjproject for a simpler build.
+RUN contrib/scripts/install_prereq install || true
+RUN ./bootstrap.sh || true
+RUN ./configure --with-pjproject-bundled --with-ssl --with-srtp --with-jansson-bundled
+
+# Non-interactive build: try to build with available cores. If menuselect is needed,
+# the build may require tweaking the menuselect options in ${ASTERISK_SRC}/menuselect/.
+RUN make -j$(nproc) || (echo "make failed; re-running single-threaded to get clearer error" && make)
+
+RUN make install \
+ && make samples \
+ && make config
+
+# Ensure Asterisk binaries are in PATH
+ENV PATH="/usr/sbin:/usr/bin:${PATH}"
+
+# Expose the default ports typically used by Asterisk (adjust as needed)
+EXPOSE 5060/udp 5060/tcp 8088/tcp 8088/udp 4573/tcp
+
+# Default command is to show the version; runtime images can use this as a base and
+# provide entrypoint scripts that configure ODBC and copy config files as needed.
+CMD ["/usr/sbin/asterisk", "-V"]

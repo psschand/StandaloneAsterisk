@@ -1,0 +1,73 @@
+version: "3.8"
+
+services:
+  asterisk:
+    image: call-center-asterisk-runtime:arm64
+    container_name: asterisk
+    hostname: asterisk
+    volumes:
+      - ./docker/asterisk/config:/etc/asterisk
+      - asterisk_recordings:/var/spool/asterisk/monitor
+      - asterisk_voicemail:/var/spool/asterisk/voicemail
+      - asterisk_sounds:/var/lib/asterisk/sounds
+    ports:
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "10000-10100:10000-10100/udp"
+      - "5038:5038"
+      - "8088:8088"
+    # environment:
+    #   - MYSQL_HOST=mysql
+    #   - MYSQL_DATABASE=${MYSQL_DATABASE}
+    #   - MYSQL_USER=${MYSQL_USER}
+    #   - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    networks:
+      - call-center-network
+    # depends_on:
+    #   mysql:
+    #     condition: service_healthy
+    # Traefik labels removed - Caddy will handle HTTP routing. SIP still exposed via ports.
+    restart: unless-stopped
+
+#   mysql:
+#     image: mysql:8.0
+#     environment:
+#       - MYSQL_HOST=mysql
+#       - MYSQL_DATABASE=${MYSQL_DATABASE}
+#       - MYSQL_USER=${MYSQL_USER}
+#       - MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD}
+#     command: --default-authentication-plugin=mysql_native_password
+#     volumes:
+#       - mysql_data:/var/lib/mysql
+#       - ./docker/mysql/init:/docker-entrypoint-initdb.d
+#       - ./docker/mysql/my.cnf:/etc/mysql/conf.d/my.cnf
+#     healthcheck:
+#       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u${MYSQL_USER}", "-p${MYSQL_PASSWORD}"]
+#       timeout: 20s
+#       retries: 10
+#       interval: 10s
+#     restart: unless-stopped
+
+#   adminer:
+#     image: adminer:latest
+#     container_name: adminer
+#     restart: unless-stopped
+#     ports:
+#       - "8080:8080"
+  
+networks:
+  call-center-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
+        
+volumes:
+  mysql_data:
+    driver: local
+  asterisk_recordings:
+    driver: local
+  asterisk_voicemail:
+    driver: local
+  asterisk_sounds:
+    driver: local

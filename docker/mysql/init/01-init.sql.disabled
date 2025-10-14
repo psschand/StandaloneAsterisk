@@ -1,0 +1,502 @@
+-- Tenants table
+CREATE TABLE IF NOT EXISTS tenants (
+    id VARCHAR(36) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    domain VARCHAR(255) UNIQUE,
+    status ENUM('active', 'suspended', 'inactive') DEFAULT 'active',
+    settings JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_status (status),
+    INDEX idx_domain (domain)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Users table
+CREATE TABLE IF NOT EXISTS users (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id VARCHAR(36) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    role ENUM('admin', 'agent', 'user') NOT NULL,
+    status ENUM('active', 'inactive') DEFAULT 'active',
+    phone VARCHAR(20),
+    avatar_url VARCHAR(500),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_email_tenant (email, tenant_id),
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    INDEX idx_tenant_role (tenant_id, role),
+    INDEX idx_email (email),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Agent profiles
+CREATE TABLE IF NOT EXISTS agents (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) NOT NULL,
+    tenant_id VARCHAR(36) NOT NULL,
+    sip_extension VARCHAR(50),
+    sip_password VARCHAR(255),
+    status ENUM('online', 'offline', 'busy', 'away') DEFAULT 'offline',
+    max_concurrent_calls INT DEFAULT 1,
+    max_concurrent_chats INT DEFAULT 3,
+    skills JSON,
+    last_activity TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_extension (sip_extension),
+    INDEX idx_tenant_status (tenant_id, status),
+    INDEX idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Phone numbers
+CREATE TABLE IF NOT EXISTS phone_numbers (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id VARCHAR(36) NOT NULL,
+    number VARCHAR(20) NOT NULL UNIQUE,
+    country_code VARCHAR(5),
+    type ENUM('local', 'toll-free', 'mobile') DEFAULT 'local',
+    provider VARCHAR(50),
+    capabilities JSON,
+    assigned_to VARCHAR(36),
+    status ENUM('active', 'inactive') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    INDEX idx_tenant (tenant_id),
+    INDEX idx_number (number),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Queues
+CREATE TABLE IF NOT EXISTS queues (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id VARCHAR(36) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    strategy ENUM('ringall', 'roundrobin', 'leastrecent', 'fewestcalls', 'random') DEFAULT 'ringall',
+    timeout INT DEFAULT 30,
+    max_wait_time INT DEFAULT 300,
+    announce_frequency INT DEFAULT 30,
+    announce_holdtime BOOLEAN DEFAULT TRUE,
+    music_on_hold VARCHAR(100),
+    priority INT DEFAULT 0,
+    settings JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    INDEX idx_tenant (tenant_id),
+    INDEX idx_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Queue members
+CREATE TABLE IF NOT EXISTS queue_members (
+    id VARCHAR(36) PRIMARY KEY,
+    queue_id VARCHAR(36) NOT NULL,
+    agent_id VARCHAR(36) NOT NULL,
+    penalty INT DEFAULT 0,
+    paused BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (queue_id) REFERENCES queues(id) ON DELETE CASCADE,
+    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_queue_agent (queue_id, agent_id),
+    INDEX idx_queue (queue_id),
+    INDEX idx_agent (agent_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Calls
+CREATE TABLE IF NOT EXISTS calls (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id VARCHAR(36) NOT NULL,
+    call_id VARCHAR(100) UNIQUE,
+    direction ENUM('inbound', 'outbound') NOT NULL,
+    from_number VARCHAR(20),
+    to_number VARCHAR(20),
+    agent_id VARCHAR(36),
+    queue_id VARCHAR(36),
+    status ENUM('ringing', 'answered', 'completed', 'failed', 'busy', 'no-answer') DEFAULT 'ringing',
+    duration INT DEFAULT 0,
+    wait_time INT DEFAULT 0,
+    recording_url VARCHAR(500),
+    transcription TEXT,
+    metadata JSON,
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    answered_at TIMESTAMP NULL,
+    ended_at TIMESTAMP NULL,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE SET NULL,
+    FOREIGN KEY (queue_id) REFERENCES queues(id) ON DELETE SET NULL,
+    INDEX idx_tenant_date (tenant_id, started_at),
+    INDEX idx_agent (agent_id),
+    INDEX idx_status (status),
+    INDEX idx_call_id (call_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Contacts
+CREATE TABLE IF NOT EXISTS contacts (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id VARCHAR(36) NOT NULL,
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    email VARCHAR(255),
+    phone VARCHAR(20),
+    company VARCHAR(255),
+    tags JSON,
+    custom_fields JSON,
+    created_by VARCHAR(36),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    INDEX idx_tenant (tenant_id),
+    INDEX idx_phone (phone),
+    INDEX idx_email (email),
+    FULLTEXT idx_name (first_name, last_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Tickets
+CREATE TABLE IF NOT EXISTS tickets (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id VARCHAR(36) NOT NULL,
+    ticket_number VARCHAR(50) NOT NULL,
+    subject VARCHAR(255) NOT NULL,
+    description TEXT,
+    status ENUM('open', 'in_progress', 'pending', 'resolved', 'closed') DEFAULT 'open',
+    priority ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium',
+    created_by VARCHAR(36),
+    assigned_to VARCHAR(36),
+    contact_id VARCHAR(36),
+    category VARCHAR(100),
+    tags JSON,
+    metadata JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    resolved_at TIMESTAMP NULL,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (assigned_to) REFERENCES agents(id) ON DELETE SET NULL,
+    FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE SET NULL,
+    UNIQUE KEY unique_ticket_number (tenant_id, ticket_number),
+    INDEX idx_tenant_status (tenant_id, status),
+    INDEX idx_assigned (assigned_to),
+    INDEX idx_priority (priority),
+    FULLTEXT idx_subject (subject)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Ticket messages
+CREATE TABLE IF NOT EXISTS ticket_messages (
+    id VARCHAR(36) PRIMARY KEY,
+    ticket_id VARCHAR(36) NOT NULL,
+    user_id VARCHAR(36),
+    message TEXT NOT NULL,
+    is_internal BOOLEAN DEFAULT FALSE,
+    attachments JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_ticket (ticket_id),
+    INDEX idx_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Chat sessions
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id VARCHAR(36) NOT NULL,
+    channel ENUM('web', 'whatsapp', 'telegram', 'slack', 'facebook', 'instagram', 'sms') NOT NULL,
+    customer_id VARCHAR(255),
+    customer_name VARCHAR(255),
+    customer_email VARCHAR(255),
+    customer_phone VARCHAR(20),
+    agent_id VARCHAR(36),
+    status ENUM('waiting', 'active', 'resolved', 'closed') DEFAULT 'waiting',
+    ai_handled BOOLEAN DEFAULT FALSE,
+    metadata JSON,
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ended_at TIMESTAMP NULL,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE SET NULL,
+    INDEX idx_tenant_status (tenant_id, status),
+    INDEX idx_agent (agent_id),
+    INDEX idx_channel (channel),
+    INDEX idx_customer (customer_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Chat messages
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id VARCHAR(36) PRIMARY KEY,
+    session_id VARCHAR(36) NOT NULL,
+    sender_type ENUM('customer', 'agent', 'ai', 'system') NOT NULL,
+    sender_id VARCHAR(36),
+    message TEXT NOT NULL,
+    message_type ENUM('text', 'image', 'file', 'audio', 'video') DEFAULT 'text',
+    attachments JSON,
+    metadata JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    INDEX idx_session (session_id),
+    INDEX idx_created (created_at),
+    INDEX idx_sender (sender_type, sender_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Chat widget settings
+CREATE TABLE IF NOT EXISTS chat_widgets (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id VARCHAR(36) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    widget_code VARCHAR(50) UNIQUE NOT NULL,
+    settings JSON,
+    theme JSON,
+    greeting_message TEXT,
+    offline_message TEXT,
+    status ENUM('active', 'inactive') DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    INDEX idx_tenant (tenant_id),
+    INDEX idx_code (widget_code),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Voicemails
+CREATE TABLE IF NOT EXISTS voicemails (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id VARCHAR(36) NOT NULL,
+    mailbox VARCHAR(50) NOT NULL,
+    caller_id VARCHAR(20),
+    duration INT,
+    recording_url VARCHAR(500),
+    transcription TEXT,
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    INDEX idx_tenant_mailbox (tenant_id, mailbox),
+    INDEX idx_created (created_at),
+    INDEX idx_read (is_read)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- SMS messages
+CREATE TABLE IF NOT EXISTS sms_messages (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id VARCHAR(36) NOT NULL,
+    direction ENUM('inbound', 'outbound') NOT NULL,
+    from_number VARCHAR(20) NOT NULL,
+    to_number VARCHAR(20) NOT NULL,
+    message TEXT NOT NULL,
+    status ENUM('queued', 'sent', 'delivered', 'failed') DEFAULT 'queued',
+    provider_message_id VARCHAR(100),
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    INDEX idx_tenant (tenant_id),
+    INDEX idx_numbers (from_number, to_number),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Blocklist
+CREATE TABLE IF NOT EXISTS blocklist (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id VARCHAR(36) NOT NULL,
+    type ENUM('phone', 'email', 'ip') NOT NULL,
+    value VARCHAR(255) NOT NULL,
+    reason VARCHAR(500),
+    created_by VARCHAR(36),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_type_value (tenant_id, type, value),
+    INDEX idx_tenant_type (tenant_id, type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- AI conversation history
+CREATE TABLE IF NOT EXISTS ai_conversations (
+    id VARCHAR(36) PRIMARY KEY,
+    session_id VARCHAR(36) NOT NULL,
+    tenant_id VARCHAR(36) NOT NULL,
+    context JSON,
+    intent VARCHAR(100),
+    confidence DECIMAL(5,2),
+    handoff_reason VARCHAR(500),
+    handoff_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    INDEX idx_session (session_id),
+    INDEX idx_tenant (tenant_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Asterisk Realtime ps_endpoints
+CREATE TABLE IF NOT EXISTS ps_endpoints (
+    id VARCHAR(40) PRIMARY KEY,
+    transport VARCHAR(40),
+    aors VARCHAR(200),
+    auth VARCHAR(40),
+    context VARCHAR(40),
+    disallow VARCHAR(200),
+    allow VARCHAR(200),
+    direct_media ENUM('yes', 'no') DEFAULT 'no',
+    connected_line_method ENUM('invite', 'update') DEFAULT 'invite',
+    direct_media_method ENUM('invite', 'update') DEFAULT 'invite',
+    disable_direct_media_on_nat ENUM('yes', 'no') DEFAULT 'no',
+    dtmf_mode ENUM('rfc4733', 'inband', 'info', 'auto') DEFAULT 'rfc4733',
+    external_media_address VARCHAR(40),
+    force_rport ENUM('yes', 'no') DEFAULT 'yes',
+    ice_support ENUM('yes', 'no') DEFAULT 'yes',
+    identify_by ENUM('username', 'auth_username', 'ip') DEFAULT 'username',
+    mailboxes VARCHAR(100),
+    moh_suggest VARCHAR(100),
+    outbound_auth VARCHAR(40),
+    outbound_proxy VARCHAR(256),
+    rewrite_contact ENUM('yes', 'no') DEFAULT 'yes',
+    rtp_ipv6 ENUM('yes', 'no') DEFAULT 'no',
+    rtp_symmetric ENUM('yes', 'no') DEFAULT 'yes',
+    send_diversion ENUM('yes', 'no') DEFAULT 'yes',
+    send_pai ENUM('yes', 'no') DEFAULT 'yes',
+    send_rpid ENUM('yes', 'no') DEFAULT 'no',
+    timers_min_se INT DEFAULT 90,
+    timers ENUM('forced', 'no', 'required', 'yes') DEFAULT 'yes',
+    timers_sess_expires INT DEFAULT 1800,
+    callerid VARCHAR(100),
+    callerid_privacy ENUM('allowed_not_screened', 'allowed_passed_screened', 'allowed_failed_screened', 'allowed', 'prohib_not_screened', 'prohib_passed_screened', 'prohib_failed_screened', 'prohib', 'unavailable') DEFAULT 'allowed_not_screened',
+    callerid_tag VARCHAR(100),
+    100rel ENUM('no', 'required', 'yes') DEFAULT 'yes',
+    aggregate_mwi ENUM('yes', 'no') DEFAULT 'yes',
+    trust_id_inbound ENUM('yes', 'no') DEFAULT 'no',
+    trust_id_outbound ENUM('yes', 'no') DEFAULT 'no',
+    use_ptime ENUM('yes', 'no') DEFAULT 'no',
+    use_avpf ENUM('yes', 'no') DEFAULT 'no',
+    media_encryption ENUM('no', 'sdes', 'dtls') DEFAULT 'no',
+    inband_progress ENUM('yes', 'no') DEFAULT 'no',
+    call_group VARCHAR(40),
+    pickup_group VARCHAR(40),
+    named_call_group VARCHAR(40),
+    named_pickup_group VARCHAR(40),
+    device_state_busy_at INT DEFAULT 0,
+    t38_udptl ENUM('yes', 'no') DEFAULT 'no',
+    t38_udptl_ec ENUM('none', 'fec', 'redundancy') DEFAULT 'none',
+    t38_udptl_maxdatagram INT DEFAULT 0,
+    fax_detect ENUM('yes', 'no') DEFAULT 'no',
+    t38_udptl_nat ENUM('yes', 'no') DEFAULT 'no',
+    t38_udptl_ipv6 ENUM('yes', 'no') DEFAULT 'no',
+    tone_zone VARCHAR(40),
+    language VARCHAR(40),
+    one_touch_recording ENUM('yes', 'no') DEFAULT 'no',
+    record_on_feature VARCHAR(40),
+    record_off_feature VARCHAR(40),
+    rtp_engine VARCHAR(40),
+    allow_transfer ENUM('yes', 'no') DEFAULT 'yes',
+    allow_subscribe ENUM('yes', 'no') DEFAULT 'yes',
+    sdp_owner VARCHAR(40),
+    sdp_session VARCHAR(40),
+    tos_audio VARCHAR(10),
+    tos_video VARCHAR(10),
+    sub_min_expiry INT DEFAULT 0,
+    from_domain VARCHAR(40),
+    from_user VARCHAR(40),
+    mwi_from_user VARCHAR(40),
+    dtls_verify VARCHAR(40),
+    dtls_rekey VARCHAR(40),
+    dtls_cert_file VARCHAR(200),
+    dtls_private_key VARCHAR(200),
+    dtls_cipher VARCHAR(200),
+    dtls_ca_file VARCHAR(200),
+    dtls_ca_path VARCHAR(200),
+    dtls_setup ENUM('active', 'passive', 'actpass') DEFAULT 'actpass',
+    srtp_tag_32 ENUM('yes', 'no') DEFAULT 'no',
+    media_address VARCHAR(40),
+    redirect_method ENUM('user', 'uri_core', 'uri_pjsip') DEFAULT 'user',
+    set_var TEXT,
+    cos_audio INT,
+    cos_video INT,
+    message_context VARCHAR(40),
+    force_avp ENUM('yes', 'no') DEFAULT 'no',
+    media_use_received_transport ENUM('yes', 'no') DEFAULT 'no',
+    accountcode VARCHAR(20),
+    user_eq_phone ENUM('yes', 'no') DEFAULT 'no',
+    moh_passthrough ENUM('yes', 'no') DEFAULT 'no',
+    media_encryption_optimistic ENUM('yes', 'no') DEFAULT 'no',
+    rpid_immediate ENUM('yes', 'no') DEFAULT 'no',
+    g726_non_standard ENUM('yes', 'no') DEFAULT 'no',
+    rtp_keepalive INT DEFAULT 0,
+    rtp_timeout INT DEFAULT 0,
+    rtp_timeout_hold INT DEFAULT 0,
+    bind_rtp_to_media_address ENUM('yes', 'no') DEFAULT 'no',
+    voicemail_extension VARCHAR(40),
+    mwi_subscribe_replaces_unsolicited INT DEFAULT 0,
+    deny VARCHAR(95),
+    permit VARCHAR(95),
+    acl VARCHAR(40),
+    contact_deny VARCHAR(95),
+    contact_permit VARCHAR(95),
+    contact_acl VARCHAR(40),
+    subscribe_context VARCHAR(40),
+    fax_detect_timeout INT DEFAULT 0,
+    contact_user VARCHAR(40),
+    preferred_codec_only ENUM('yes', 'no') DEFAULT 'no',
+    asymmetric_rtp_codec ENUM('yes', 'no') DEFAULT 'no',
+    rtcp_mux ENUM('yes', 'no') DEFAULT 'no',
+    refer_blind_progress ENUM('yes', 'no') DEFAULT 'yes',
+    notify_early_inuse_ringing ENUM('yes', 'no') DEFAULT 'no',
+    max_audio_streams INT DEFAULT 1,
+    max_video_streams INT DEFAULT 1,
+    webrtc ENUM('yes', 'no') DEFAULT 'no',
+    dtls_fingerprint VARCHAR(40) DEFAULT 'SHA-256',
+    incoming_call_offer_pref VARCHAR(40) DEFAULT 'local',
+    outgoing_call_offer_pref VARCHAR(40) DEFAULT 'local_first',
+    stir_shaken ENUM('off', 'attest', 'verify', 'on') DEFAULT 'off',
+    send_connected_line ENUM('yes', 'no') DEFAULT 'yes',
+    send_history_info ENUM('yes', 'no') DEFAULT 'no'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Asterisk Realtime ps_auths
+CREATE TABLE IF NOT EXISTS ps_auths (
+    id VARCHAR(40) PRIMARY KEY,
+    auth_type ENUM('userpass', 'md5') DEFAULT 'userpass',
+    nonce_lifetime INT DEFAULT 32,
+    md5_cred VARCHAR(40),
+    password VARCHAR(80),
+    realm VARCHAR(40),
+    username VARCHAR(40)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Asterisk Realtime ps_aors
+CREATE TABLE IF NOT EXISTS ps_aors (
+    id VARCHAR(40) PRIMARY KEY,
+    contact VARCHAR(255),
+    default_expiration INT DEFAULT 3600,
+    mailboxes VARCHAR(100),
+    max_contacts INT DEFAULT 1,
+    minimum_expiration INT DEFAULT 60,
+    remove_existing ENUM('yes', 'no') DEFAULT 'no',
+    qualify_frequency INT DEFAULT 0,
+    authenticate_qualify ENUM('yes', 'no') DEFAULT 'no',
+    maximum_expiration INT DEFAULT 7200,
+    outbound_proxy VARCHAR(256),
+    support_path ENUM('yes', 'no') DEFAULT 'no',
+    qualify_timeout DECIMAL(5,3) DEFAULT 3.000,
+    voicemail_extension VARCHAR(40)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Asterisk Realtime ps_contacts
+CREATE TABLE IF NOT EXISTS ps_contacts (
+    id VARCHAR(255) PRIMARY KEY,
+    uri VARCHAR(511),
+    expiration_time BIGINT,
+    qualify_frequency INT DEFAULT 0,
+    qualify_timeout DECIMAL(5,3),
+    authenticate_qualify ENUM('yes', 'no') DEFAULT 'no',
+    outbound_proxy VARCHAR(256),
+    path TEXT,
+    user_agent VARCHAR(255),
+    endpoint VARCHAR(40),
+    reg_server VARCHAR(255)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Insert default tenant
+INSERT INTO tenants (id, name, domain, status, settings) VALUES
+('default-tenant-id', 'Default Tenant', 'localhost', 'active', '{}');
+
+-- Insert default admin user
+INSERT INTO users (id, tenant_id, email, password, first_name, last_name, role, status) VALUES
+('admin-user-id', 'default-tenant-id', 'admin@localhost.com', '$2a$10$XQN0Vh9.KQgKvVDQlJYmHeqfg7lVGqxOK8WdQfNKJYxPJTVQP3jmG', 'Admin', 'User', 'admin', 'active');
+-- Password is 'admin123'

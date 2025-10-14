@@ -1,0 +1,174 @@
+[general]
+static=yes
+writeprotect=no
+clearglobalvars=no
+
+[globals]
+RECORDINGS_DIR=/var/spool/asterisk/monitor
+VOICEMAIL_DIR=/var/spool/asterisk/voicemail
+
+[from-internal]
+; Internal extensions - agent to agent calls
+exten => _[1-9]XXX,1,NoOp(Internal call from ${CALLERID(num)} to ${EXTEN})
+ same => n,Set(CALLERID(name)=${DB(agent/${CALLERID(num)}/name)})
+ same => n,Dial(PJSIP/${EXTEN},30,tT)
+ same => n,GotoIf($["${DIALSTATUS}" = "BUSY"]?busy:unavail)
+ same => n(unavail),VoiceMail(${EXTEN}@default,u)
+ same => n,Hangup()
+ same => n(busy),VoiceMail(${EXTEN}@default,b)
+ same => n,Hangup()
+
+; Outbound calls
+exten => _NXXNXXXXXX,1,NoOp(Outbound call to ${EXTEN})
+ same => n,Set(CALLERID(num)=${DB(tenant/${TENANT_ID}/caller_id)})
+ same => n,AGI(agi://backend:8000/agi/outbound)
+ same => n,Dial(PJSIP/${EXTEN}@trunk)
+ same => n,Hangup()
+
+; International calls
+exten => _011.,1,NoOp(International call to ${EXTEN})
+ same => n,AGI(agi://backend:8000/agi/outbound)
+ same => n,Dial(PJSIP/${EXTEN}@trunk)
+ same => n,Hangup()
+
+; Queue calls
+exten => _Q.,1,NoOp(Queue call to ${EXTEN})
+ same => n,Answer()
+ same => n,Set(QUEUE_NAME=${EXTEN:1})
+ same => n,Set(CHANNEL(musicclass)=default)
+ same => n,Queue(${QUEUE_NAME},tTc,,,300,,,queuecallback)
+ same => n,Hangup()
+
+; Conference rooms
+exten => _C.,1,NoOp(Conference call ${EXTEN})
+ same => n,Answer()
+ same => n,Set(CONF_NUM=${EXTEN:1})
+ same => n,ConfBridge(${CONF_NUM})
+ same => n,Hangup()
+
+; Voicemail access
+exten => *97,1,NoOp(Voicemail access)
+ same => n,VoiceMailMain(${CALLERID(num)}@default)
+ same => n,Hangup()
+
+; Call recording toggle
+exten => *1,1,NoOp(Toggle recording)
+ same => n,Set(RECORDING=${IF($[${RECORDING}=1]?0:1)})
+ same => n,GotoIf($[${RECORDING}=1]?start:stop)
+ same => n(start),MixMonitor(${RECORDINGS_DIR}/${UNIQUEID}.wav)
+ same => n,Playback(beep)
+ same => n,Hangup()
+ same => n(stop),StopMixMonitor()
+ same => n,Playback(beep)
+ same => n,Hangup()
+
+; Call transfer
+exten => *2,1,NoOp(Attended transfer)
+ same => n,Read(TRANSFER_TO,dial,4)
+ same => n,AttendedTransfer(PJSIP/${TRANSFER_TO})
+ same => n,Hangup()
+
+; Call parking
+exten => *3,1,NoOp(Park call)
+ same => n,Park()
+ same => n,Hangup()
+
+; Retrieve parked call
+exten => *4,1,NoOp(Retrieve parked call)
+ same => n,Read(PARK_SLOT,dial,3)
+ same => n,ParkedCall(${PARK_SLOT})
+ same => n,Hangup()
+
+; Echo test extension
+exten => 600,1,NoOp(Echo Test called by ${CALLERID(num)})
+ same => n,Answer()
+ same => n,Wait(2)
+ same => n,Playback(beep)
+ same => n,Wait(1)
+ same => n,Playback(beep)
+ same => n,Wait(1)
+ same => n,Echo()
+ same => n,Hangup()
+
+[from-external]
+; Incoming calls from PSTN/Trunk
+exten => _X.,1,NoOp(Incoming call from ${CALLERID(num)} to ${EXTEN})
+ same => n,Set(CHANNEL(language)=en)
+ same => n,Set(CHANNEL(musicclass)=default)
+ same => n,Set(DID_NUMBER=${EXTEN})
+ same => n,AGI(agi://backend:8000/agi/route)
+ same => n,Hangup()
+
+; Direct DID routing (if AGI fails or for testing)
+exten => +15551234567,1,NoOp(Incoming call to Test Main Line)
+ same => n,Answer()
+ same => n,Dial(PJSIP/1001,30,tT)
+ same => n,VoiceMail(1001@default,u)
+ same => n,Hangup()
+
+exten => +15551234568,1,NoOp(Incoming call to Support Line)
+ same => n,Answer()
+ same => n,Queue(support,tT,,,300)
+ same => n,VoiceMail(support@default,u)
+ same => n,Hangup()
+
+; Emergency calls
+exten => 911,1,NoOp(Emergency call)
+ same => n,Dial(PJSIP/911@trunk)
+ same => n,Hangup()
+
+[queuecallback]
+; Queue callback context
+exten => s,1,NoOp(Queue callback)
+ same => n,Playback(queue-callswaiting)
+ same => n,Return()
+
+[voicemail-context]
+exten => s,1,NoOp(Sending to voicemail ${ARG1})
+ same => n,VoiceMail(${ARG1}@default,u)
+ same => n,Hangup()
+
+[after-hours]
+; After hours handling
+exten => s,1,NoOp(After hours)
+ same => n,Playback(custom/after-hours)
+ same => n,VoiceMail(general@default,u)
+ same => n,Hangup()
+
+[ivr-main]
+; Main IVR menu
+exten => s,1,NoOp(IVR Main Menu)
+ same => n,Answer()
+ same => n,Set(TIMEOUT(digit)=5)
+ same => n,Set(TIMEOUT(response)=10)
+ same => n(start),Background(custom/welcome)
+ same => n,Background(custom/ivr-menu)
+ same => n,WaitExten(10)
+
+exten => 1,1,NoOp(Sales queue)
+ same => n,Goto(from-internal,Q1001,1)
+
+exten => 2,1,NoOp(Support queue)
+ same => n,Goto(from-internal,Q1002,1)
+
+exten => 3,1,NoOp(Billing queue)
+ same => n,Goto(from-internal,Q1003,1)
+
+exten => 0,1,NoOp(Operator)
+ same => n,Dial(PJSIP/operator)
+ same => n,VoiceMail(operator@default)
+ same => n,Hangup()
+
+exten => i,1,NoOp(Invalid option)
+ same => n,Playback(invalid)
+ same => n,Goto(s,start)
+
+exten => t,1,NoOp(Timeout)
+ same => n,Playback(goodbye)
+ same => n,Hangup()
+
+[callback]
+; Callback context
+exten => s,1,NoOp(Callback ${ARG1})
+ same => n,Originate(PJSIP/${ARG1},exten,from-internal,${ARG2},1)
+ same => n,Hangup()

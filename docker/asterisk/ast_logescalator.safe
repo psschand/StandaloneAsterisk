@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Safe ast_logescalator replacement that avoids sed -i on bind mounts.
+# It writes changes to a temp file then moves them into place.
+set -euo pipefail
+
+safe_sed_apply() {
+  local file="$1";
+  shift
+  local tmpfile
+  tmpfile=$(mktemp)
+  sed "$@" "$file" > "$tmpfile"
+  mv "$tmpfile" "$file"
+}
+
+# This script intentionally keeps behavior minimal; the real ast_logescalator has many
+# environment-specific behaviors. We only provide placeholder functionality that won't
+# break when configuration directories are bind-mounted.
+
+# Example: update CLI_CONF's startup commands in a safe way if file exists.
+CLI_CONF="/etc/asterisk/cli.conf"
+if [ -f "$CLI_CONF" ]; then
+  # no-op placeholder: ensure the file exists and is readable
+  :
+fi
+
+# Print a small banner (keeps logs similar to upstream)
+echo "ast_logescalator safe placeholder"
+
+# Run any provided command
+if [ "$#" -gt 0 ]; then
+  exec "$@"
+fi
