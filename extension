@@ -1,0 +1,18 @@
+Extension 100
+
+Username: 100
+Password: changeme100
+Source: docker/asterisk/config/pjsip copy.conf (auth section [100-auth])
+Also referenced by template variables in pjsip.conf.tpl as ${EXT_100_USERNAME} / ${EXT_100_PASSWORD}
+Extension 101
+
+Username: 101
+Password: changeme101
+Source: docker/asterisk/config/pjsip copy.conf (auth section [101-auth])
+Template example for extension 101 exists in pjsip.conf.tpl (commented) using ${EXT_101_USERNAME} / ${EXT_101_PASSWORD}
+Twilio trunk auth (credential-based)
+
+Username: Admin
+Password: Admin@1234567
+Source: pjsip.conf (section [twilio-na-us-auth]) and docker/asterisk/config/pjsip copy.conf ([twilio_auth])
+Template variables: pjsip.conf.tpl uses ${TWILIO_USERNAME} and ${TWILIO_PASSWORD}

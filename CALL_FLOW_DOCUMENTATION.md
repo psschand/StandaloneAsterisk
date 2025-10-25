@@ -313,6 +313,71 @@ docker compose exec asterisk tail -f /var/log/asterisk/messages | grep -E 'INVIT
 # Check recent activity
 docker compose exec asterisk tail -n 50 /var/log/asterisk/messages
 ```
+## Trace routes & log markers (Inbound vs Outbound)
+
+This system instruments the dialplan with deterministic Log(NOTICE,TRACE: ...) markers so you can reliably see which context handled a call. Below is a short reference explaining which dialplan contexts emit TRACE markers, example lines, and quick commands to extract per-call timelines.
+
+Why this matters
+- TRACE markers make it easy to correlate network-level SIP messages (pcap) with in-Asterisk dialplan activity (which extensions/contexts executed). Use TRACE to answer "did this call run through outbound or was it matched directly in from-internal/from-twilio?"
+
+Typical TRACE mapping
+- from-twilio: incoming calls from Twilio POPs are identified by pjsip and routed to `from-twilio`. Typical TRACE line:
+
+   [2025-10-18 00:03:43] NOTICE[199][C-0000000e] Ext. +19863334949: TRACE: from-twilio hit from-twilio/+19863334949 caller=hello
+
+- from-pstn: similar to from-twilio but used for other PSTN / wizard routes. Example (before/after Dial markers may be present):
+
+   [2025-10-18 00:37:03] NOTICE[2209][C-0000000f] Ext. +19863334949: TRACE: from-pstn hit from-pstn/+19863334949 caller=hello
+
+- from-internal / internal: calls originated by internal devices (extensions) will hit one of these contexts. When an internal user dials E.164 (e.g. +181...), the `_+.` rule in `from-internal` will match and emit a TRACE. Example:
+
+   [2025-10-18 01:36:03] NOTICE[7402][C-00000015] Ext. +18123894546: TRACE: from-internal hit from-internal/+18123894546 caller=100
+
+- outbound: this context is used when dialing via the 9-prefix (`_9+.`). If your phone dials `9<number>` the `outbound` context's TRACE markers will be executed. Example (if matched):
+
+   [2025-10-18 01:40:12] NOTICE[7500][C-00000016] Ext. 91551234567: TRACE: outbound before Dial outbound/91551234567 target=+15551234567 caller=100
+
+Why a call might not show `outbound`
+- If the extension sends an E.164 number (starts with `+`), the `_+.` pattern in `from-internal` will match first and handle the call there. The `outbound` context expects a leading `9` prefix (`_9+.`), so it will not be used unless the dialed digits begin with `9`.
+
+Commands — live capture and trace extraction
+- Start a host-side capture (SIP + RTP):
+
+```bash
+sudo tcpdump -i $(ip route get 8.8.8.8 | awk '{print $5; exit}') -w /tmp/live_sip_rtp.pcap \
+   udp and \(port 5060 or portrange 10000-20000\) &
+echo $! > /tmp/tcpdump_pid
+```
+
+- Tail the container Asterisk log and capture TRACE lines to a host file:
+
+```bash
+sudo bash -c "docker exec -i asterisk sh -c 'tail -n0 -F /var/log/asterisk/full | sed -n \"/TRACE:/p\"' > /tmp/live_asterisk_trace.log 2>&1 & echo \$! > /tmp/ast_tail_pid"
+```
+
+- After the call, stop the capture and tail (example):
+
+```bash
+sudo kill $(cat /tmp/tcpdump_pid) || true
+sudo pkill -F /tmp/ast_tail_pid || true
+# or use: sudo kill $(cat /tmp/ast_tail_pid)
+```
+
+- Extract SIP messages for a specific Call-ID from the pcap (text form):
+
+```bash
+sudo tcpdump -tttt -nn -r /tmp/live_sip_rtp.pcap -A 2>/dev/null | sed -n "/<CALL-ID>/,/<CALL-ID>/p"
+# replace <CALL-ID> with the actual Call-ID string
+```
+
+- Grep the live trace file for channel or number
+
+```bash
+egrep -n "C-000000|\+181|outbound|from-internal|from-twilio" /tmp/live_asterisk_trace.log
+```
+
+Quick reproducible rule
+- If you want all outbound calls to go through the `outbound` context regardless of whether the dialed digits start with `+` or `9`, change `from-internal` to forward its international matching to `outbound` (example shown below in Dialplan section). That ensures a single, consistent TRACE path for outbound dials.
 
 ## Extension Configuration (Zoiper)
 
