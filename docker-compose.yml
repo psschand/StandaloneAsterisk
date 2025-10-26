@@ -16,21 +16,27 @@ services:
       - "10000-10100:10000-10100/udp"
       - "5038:5038"
       - "8088:8088"
-    # environment:
-    #   - MYSQL_HOST=mysql
-    #   - MYSQL_DATABASE=${MYSQL_DATABASE}
-    #   - MYSQL_USER=${MYSQL_USER}
-    #   - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    environment:
+      - MYSQL_HOST=mysql
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - ASTERISK_PUBLIC_IP=${ASTERISK_PUBLIC_IP}
+      - TWILIO_SIP_DOMAIN=${TWILIO_SIP_DOMAIN}
+      - TWILIO_IPS=${TWILIO_IPS}
+      - TWILIO_USERNAME=${TWILIO_USERNAME}
+      - TWILIO_PASSWORD=${TWILIO_PASSWORD}
+      - TWILIO_ORIGINATING_NUMBER=${TWILIO_ORIGINATING_NUMBER}
+      - EXT_100_USERNAME=${EXT_100_USERNAME}
+      - EXT_100_PASSWORD=${EXT_100_PASSWORD}
+      - EXT_100_CALLERID=${EXT_100_CALLERID}
     networks:
       - call-center-network
-    # depends_on:
-    #   mysql:
-    #     condition: service_healthy
-    # Traefik labels removed - Caddy will handle HTTP routing. SIP still exposed via ports.
     restart: unless-stopped
 
   mysql:
     image: mysql:8.0
+    container_name: mysql
     environment:
       - MYSQL_HOST=mysql
       - MYSQL_DATABASE=${MYSQL_DATABASE}
@@ -41,6 +47,8 @@ services:
       - mysql_data:/var/lib/mysql
       - ./docker/mysql/init:/docker-entrypoint-initdb.d
       - ./docker/mysql/my.cnf:/etc/mysql/conf.d/my.cnf
+    networks:
+      - call-center-network
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u${MYSQL_USER}", "-p${MYSQL_PASSWORD}"]
       timeout: 20s

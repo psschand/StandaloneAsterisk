@@ -8,8 +8,8 @@ user_agent=Asterisk-Twilio-Docker
 type=transport
 protocol=udp
 bind=0.0.0.0
-external_signaling_address=138.2.68.107
-external_media_address=138.2.68.107
+external_signaling_address=${ASTERISK_PUBLIC_IP}
+external_media_address=${ASTERISK_PUBLIC_IP}
 allow_reload=yes
 
 ; ==================== Twilio SIP trunk ====================
@@ -18,7 +18,7 @@ allow_reload=yes
 
 [twilio_trunk]
 type=aor
-contact=sip:nlpbay.pstn.ashburn.twilio.com:5060
+contact=sip:${TWILIO_SIP_DOMAIN}:5060
 qualify_frequency=60
 
 [twilio_trunk]
@@ -29,8 +29,8 @@ disallow=all
 allow=ulaw,alaw
 aors=twilio_trunk
 outbound_auth=twilio_auth
-from_domain=nlpbay.pstn.ashburn.twilio.com
-from_user=+19863334949
+from_domain=${TWILIO_SIP_DOMAIN}
+from_user=${TWILIO_ORIGINATING_NUMBER}
 rewrite_contact=yes
 force_rport=yes
 rtp_symmetric=yes
@@ -41,14 +41,13 @@ t38_udptl=no
 [twilio_trunk]
 type=identify
 endpoint=twilio_trunk
-match=54.172.60.0/24
-match=54.244.51.0/24
+match=${TWILIO_IPS}
 
 [twilio_auth]
 type=auth
 auth_type=userpass
-username=Admin
-password=Admin@1234567
+username=${TWILIO_USERNAME}
+password=${TWILIO_PASSWORD}
 
 ; ==================== Softphone extensions ====================
 ; Extension 100 (Zoiper)
@@ -60,8 +59,8 @@ remove_existing=yes
 [100]
 type=auth
 auth_type=userpass
-username=100
-password=changeme100
+username=${EXT_100_USERNAME}
+password=${EXT_100_PASSWORD}
 
 [100]
 type=endpoint
@@ -71,7 +70,7 @@ disallow=all
 allow=ulaw,alaw
 auth=100
 aors=100
-callerid=Agent 100 <9863334949>
+callerid=${EXT_100_CALLERID}
 force_rport=yes
 rtp_symmetric=yes
 rewrite_contact=yes

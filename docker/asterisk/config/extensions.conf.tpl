@@ -23,30 +23,13 @@ exten => _X.,1,NoOp(Unhandled Twilio DID ${EXTEN})
 
 [outbound]
 ; Dial out via Twilio SIP trunk
-; Use prefix 9 to dial external numbers: dial 9 + phone number
-; OR dial +1XXXXXXXXXX directly for E.164 format
-; Examples: 
-;   915551234567 calls +15551234567 (adds + prefix for E.164)
-;   9+15551234567 calls +15551234567 (handles + in dial string)
-;   +15551234567 calls +15551234567 (direct E.164 dialing)
-
-; Pattern for 9-prefix dialing
+; Use prefix 9 to dial external numbers: dial 9 + E.164 or national number
 exten => _9.,1,NoOp(Outbound via Twilio: ${EXTEN})
  same => n,Set(NUM=${EXTEN:1})
- same => n,GotoIf($["${NUM:0:1}" = "+"]?dial:add_plus)
- same => n(add_plus),Set(NUM=+${NUM})
- same => n(dial),Set(CALLERID(num)=${TWILIO_ORIGINATING_NUMBER})
+ same => n,Set(CALLERID(num)=${TWILIO_ORIGINATING_NUMBER})
  same => n,Set(CALLERID(name)=CallCenter)
  same => n,NoOp(Dialing ${NUM} from ${CALLERID(num)})
  same => n,Dial(PJSIP/${NUM}@twilio_trunk,30)
- same => n,Hangup()
-
-; Pattern for direct E.164 dialing (+1XXXXXXXXXX)
-exten => _+1XXXXXXXXXX,1,NoOp(Direct E.164 Outbound: ${EXTEN})
- same => n,Set(CALLERID(num)=${TWILIO_ORIGINATING_NUMBER})
- same => n,Set(CALLERID(name)=CallCenter)
- same => n,NoOp(Dialing ${EXTEN} from ${CALLERID(num)})
- same => n,Dial(PJSIP/${EXTEN}@twilio_trunk,30)
  same => n,Hangup()
 
 [internal]

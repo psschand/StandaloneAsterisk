@@ -1,0 +1,257 @@
+package websocket
+
+import (
+	"context"
+	"log"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/psschand/callcenter/internal/dto"
+	"github.com/psschand/callcenter/internal/websocket"
+)
+
+// Example: Integrating WebSocket into the main API server
+
+func SetupWebSocketRoutes(router *gin.Engine, hub *websocket.Hub, wsHandler *websocket.Handler, authMiddleware gin.HandlerFunc) {
+	// WebSocket endpoint (requires authentication)
+	router.GET("/ws", authMiddleware, wsHandler.HandleWebSocket)
+
+	// Public WebSocket endpoint for chat widgets (no auth required)
+	router.GET("/ws/public", wsHandler.HandleWebSocketPublic)
+
+	// WebSocket statistics endpoint
+	router.GET("/ws/stats", authMiddleware, wsHandler.HandleStats)
+
+	// Check user online status
+	router.GET("/ws/users/:user_id/online", authMiddleware, wsHandler.HandleUserOnline)
+}
+
+// Example: Using EventBroadcaster in services
+
+// Example in AgentStateService
+func (s *AgentStateService) UpdateAgentState(ctx context.Context, tenantID string, userID int64, state, reason string) error {
+	// ... update database ...
+
+	// Broadcast event to WebSocket clients
+	if s.broadcaster != nil {
+		username := "agent_" + string(rune(userID)) // Get actual username from context/db
+		if err := s.broadcaster.AgentStateChange(tenantID, userID, username, state, reason); err != nil {
+			log.Printf("Failed to broadcast agent state change: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// Example in CDRService
+func (s *CDRService) OnCallAnswered(tenantID, uniqueID string, agentID int64, agentName string) {
+	if s.broadcaster != nil {
+		if err := s.broadcaster.CallAnswered(tenantID, uniqueID, agentID, agentName); err != nil {
+			log.Printf("Failed to broadcast call answered: %v", err)
+		}
+	}
+}
+
+// Example in ChatService
+func (s *ChatService) SendMessage(ctx context.Context, tenantID string, sessionID, senderID int64,
+	senderType, senderName string, req *dto.SendChatMessageRequest) (*dto.ChatMessageResponse, error) {
+
+	// ... save message to database ...
+	message := &dto.ChatMessageResponse{
+		ID:         123,
+		SessionID:  sessionID,
+		SenderID:   senderID,
+		SenderType: senderType,
+		SenderName: senderName,
+		Body:       req.Body,
+		CreatedAt:  time.Now().Format(time.RFC3339),
+	}
+
+	// Broadcast to WebSocket clients
+	if s.broadcaster != nil {
+		if err := s.broadcaster.ChatMessageSent(
+			tenantID, sessionID, message.ID, senderID,
+			senderType, senderName, req.Body,
+		); err != nil {
+			log.Printf("Failed to broadcast chat message: %v", err)
+		}
+	}
+
+	return message, nil
+}
+
+// Example: Modifying cmd/api/main.go to integrate WebSocket
+
+/*
+func main() {
+	// ... existing setup ...
+
+	// Create WebSocket hub
+	wsHub := websocket.NewHub()
+
+	// Start hub in goroutine
+	go wsHub.Run()
+	log.Println("WebSocket hub started")
+
+	// Create WebSocket handler
+	wsHandler := websocket.NewHandler(wsHub)
+
+	// Create event broadcaster for services
+	broadcaster := websocket.NewEventBroadcaster(wsHub)
+
+	// Pass broadcaster to services
+	services := &Services{
+		AuthService:       service.NewAuthService(db, jwtSecret, broadcaster),
+		UserService:       service.NewUserService(userRepo, broadcaster),
+		TenantService:     service.NewTenantService(tenantRepo, broadcaster),
+		CDRService:        service.NewCDRService(cdrRepo, broadcaster),
+		QueueService:      service.NewQueueService(queueRepo, queueMemberRepo, broadcaster),
+		AgentStateService: service.NewAgentStateService(agentStateRepo, broadcaster),
+		ChatService:       service.NewChatService(chatRepo, broadcaster),
+		TicketService:     service.NewTicketService(ticketRepo, broadcaster),
+		DIDService:        service.NewDIDService(didRepo, broadcaster),
+	}
+
+	// Setup routes
+	router := gin.Default()
+
+	// Setup WebSocket routes
+	SetupWebSocketRoutes(router, wsHub, wsHandler, middleware.AuthMiddleware(jwtSecret))
+
+	// ... rest of route setup ...
+
+	// Start server
+	log.Println("Starting server on :8080")
+	router.Run(":8080")
+}
+*/
+
+// Example: Client-side JavaScript integration
+
+/*
+// Connect to WebSocket
+const token = localStorage.getItem('jwt_token');
+const ws = new WebSocket('wss://api.example.com/ws');
+
+// Send token after connection (if not using query param)
+ws.onopen = () => {
+  console.log('WebSocket connected');
+
+  // Subscribe to specific events
+  ws.send(JSON.stringify({
+    type: 'subscribe',
+    payload: {
+      events: [
+        'agent.state.changed',
+        'call.incoming',
+        'call.answered',
+        'call.ended',
+        'queue.stats',
+        'chat.message',
+        'notification'
+      ]
+    }
+  }));
+};
+
+// Handle incoming messages
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+
+  switch(message.type) {
+    case 'agent.state.changed':
+      updateAgentStatus(message.payload);
+      break;
+
+    case 'call.incoming':
+      showIncomingCallNotification(message.payload);
+      playRingtone();
+      break;
+
+    case 'call.answered':
+      updateCallStatus(message.payload.unique_id, 'answered');
+      break;
+
+    case 'call.ended':
+      updateCallStatus(message.payload.unique_id, 'ended');
+      break;
+
+    case 'queue.stats':
+      updateQueueDashboard(message.payload);
+      break;
+
+    case 'chat.message':
+      appendChatMessage(message.payload);
+      playNotificationSound();
+      break;
+
+    case 'notification':
+      showNotification(message.payload.title, message.payload.message);
+      break;
+
+    case 'pong':
+      // Keepalive response
+      break;
+  }
+};
+
+// Handle errors
+ws.onerror = (error) => {
+  console.error('WebSocket error:', error);
+};
+
+// Handle close
+ws.onclose = (event) => {
+  console.log('WebSocket closed:', event.code, event.reason);
+  // Implement reconnection logic
+  setTimeout(() => {
+    connectWebSocket();
+  }, 5000);
+};
+
+// Send ping periodically
+setInterval(() => {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'ping' }));
+  }
+}, 30000);
+
+// Send typing indicator
+function sendTypingIndicator(sessionId, isTyping) {
+  ws.send(JSON.stringify({
+    type: 'chat.typing',
+    payload: {
+      session_id: sessionId,
+      sender_type: 'agent',
+      sender_name: currentUser.name,
+      is_typing: isTyping
+    }
+  }));
+}
+*/
+
+// Example: Testing WebSocket locally with wscat
+
+/*
+# Install wscat
+npm install -g wscat
+
+# Connect to WebSocket (replace with your JWT token)
+wscat -c "ws://localhost:8080/ws" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+# Once connected, you can:
+
+# Send ping
+> {"type":"ping"}
+< {"type":"pong","timestamp":"2024-10-25T10:30:00Z"}
+
+# Subscribe to events
+> {"type":"subscribe","payload":{"events":["call.incoming","agent.state.changed"]}}
+
+# Wait for events from server
+< {"type":"call.incoming","payload":{"unique_id":"1234567890","caller_id":"1234567890","destination":"100","queue_name":"support"},"timestamp":"2024-10-25T10:31:00Z","tenant_id":"tenant-123"}
+
+# Unsubscribe from events
+> {"type":"unsubscribe","payload":{"events":["call.incoming"]}}
+*/

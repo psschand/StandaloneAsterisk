@@ -1,0 +1,383 @@
+package main
+
+// INTEGRATION EXAMPLE: How to use WebSocket with Pub/Sub and Webhooks
+
+import (
+	"context"
+	"log"
+	"os"
+
+	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
+	
+	"github.com/psschand/callcenter/internal/middleware"
+	"github.com/psschand/callcenter/internal/repository"
+	"github.com/psschand/callcenter/internal/service"
+	ws "github.com/psschand/callcenter/internal/websocket"
+)
+
+func main() {
+	// 1. Setup Redis (optional - for scaling)
+	var redisClient *redis.Client
+	redisURL := os.Getenv("REDIS_URL")
+	
+	if redisURL != "" {
+		redisClient = redis.NewClient(&redis.Options{
+			Addr:     redisURL,
+			Password: os.Getenv("REDIS_PASSWORD"),
+			DB:       0,
+		})
+		
+		// Test connection
+		if err := redisClient.Ping(context.Background()).Err(); err != nil {
+			log.Printf("Redis connection failed: %v (continuing without Redis)", err)
+			redisClient = nil
+		} else {
+			log.Println("✓ Redis connected")
+		}
+	}
+	
+	// 2. Create WebSocket Hub
+	var hub *ws.Hub
+	if redisClient != nil {
+		// Production: Use PubSubHub for horizontal scaling
+		pubsubHub := ws.NewPubSubHub(redisClient)
+		go pubsubHub.Run()
+		hub = pubsubHub.Hub // PubSubHub embeds Hub
+		log.Println("✓ PubSubHub started with Redis")
+	} else {
+		// Development: Use basic Hub
+		hub = ws.NewHub()
+		go hub.Run()
+		log.Println("✓ Hub started (local only)")
+	}
+	
+	// 3. Create Webhook Manager
+	webhookManager := ws.NewWebhookManager(10) // 10 concurrent workers
+	webhookManager.Start()
+	log.Println("✓ Webhook manager started with 10 workers")
+	
+	// 4. Create Webhook Repository (implements WebhookRepository interface)
+	// This fetches webhook configs from database
+	webhookRepo := repository.NewWebhookRepository(db)
+	
+	// 5. Create EventWebhookBroadcaster (broadcasts to both WS and Webhooks)
+	broadcaster := ws.NewEventWebhookBroadcaster(hub, webhookManager, webhookRepo)
+	log.Println("✓ Event broadcaster ready")
+	
+	// 6. Pass broadcaster to services
+	agentService := service.NewAgentStateService(agentRepo, broadcaster)
+	cdrService := service.NewCDRService(cdrRepo, broadcaster)
+	chatService := service.NewChatService(chatRepo, broadcaster)
+	queueService := service.NewQueueService(queueRepo, broadcaster)
+	
+	// 7. Setup WebSocket handler
+	wsHandler := ws.NewHandler(hub)
+	
+	// 8. Setup routes
+	router := gin.Default()
+	
+	// WebSocket endpoints
+	authMiddleware := middleware.AuthMiddleware(jwtSecret)
+	router.GET("/ws", authMiddleware, wsHandler.HandleWebSocket)
+	router.GET("/ws/public", wsHandler.HandleWebSocketPublic) // For chat widgets
+	router.GET("/ws/stats", authMiddleware, wsHandler.HandleStats)
+	router.GET("/ws/users/:user_id/online", authMiddleware, wsHandler.HandleUserOnline)
+	
+	// Example: Service methods now broadcast automatically
+	// When you call service methods, events are broadcast to both WebSocket and Webhooks
+	
+	// 9. Start server
+	log.Println("✓ Server starting on :8080")
+	router.Run(":8080")
+}
+
+// EXAMPLE SERVICE INTEGRATION
+// In internal/service/agent_state_service.go:
+
+type AgentStateService struct {
+	repo        *repository.AgentStateRepository
+	broadcaster *ws.EventWebhookBroadcaster // Add this
+}
+
+func NewAgentStateService(repo *repository.AgentStateRepository, broadcaster *ws.EventWebhookBroadcaster) *AgentStateService {
+	return &AgentStateService{
+		repo:        repo,
+		broadcaster: broadcaster,
+	}
+}
+
+func (s *AgentStateService) UpdateState(ctx context.Context, tenantID string, userID int64, state, reason string) error {
+	// Update database
+	if err := s.repo.UpdateState(ctx, tenantID, userID, state, reason); err != nil {
+		return err
+	}
+	
+	// Get user details
+	user, _ := s.repo.GetUser(ctx, userID)
+	
+	// Broadcast to WebSocket clients AND webhooks
+	if s.broadcaster != nil {
+		payload := &ws.AgentStatePayload{
+			UserID:    userID,
+			Username:  user.Username,
+			State:     state,
+			Reason:    reason,
+			Extension: user.Extension,
+		}
+		
+		// This goes to:
+		// 1. All WebSocket clients subscribed to agent.state.changed
+		// 2. All configured webhooks that listen to agent.state.changed
+		s.broadcaster.BroadcastAgentState(tenantID, payload)
+	}
+	
+	return nil
+}
+
+// EXAMPLE CDR SERVICE INTEGRATION
+// In internal/service/cdr_service.go:
+
+func (s *CDRService) OnCallAnswered(ctx context.Context, tenantID, uniqueID string, agentID int64, agentName string) {
+	// Broadcast event
+	if s.broadcaster != nil {
+		payload := &ws.CallEventPayload{
+			UniqueID:  uniqueID,
+			AgentID:   agentID,
+			AgentName: agentName,
+		}
+		s.broadcaster.BroadcastCallEvent(tenantID, ws.MessageTypeCallAnswered, payload)
+	}
+}
+
+// EXAMPLE CHAT SERVICE INTEGRATION
+// In internal/service/chat_service.go:
+
+func (s *ChatService) SendMessage(ctx context.Context, tenantID string, sessionID, senderID int64, 
+	senderType, senderName string, req *dto.SendChatMessageRequest) (*dto.ChatMessageResponse, error) {
+	
+	// Save to database
+	message := &model.ChatMessage{
+		SessionID:  sessionID,
+		SenderID:   senderID,
+		SenderType: senderType,
+		SenderName: senderName,
+		Body:       req.Body,
+	}
+	if err := s.repo.Create(ctx, message); err != nil {
+		return nil, err
+	}
+	
+	// Broadcast to WebSocket and webhooks
+	if s.broadcaster != nil {
+		payload := &ws.ChatMessagePayload{
+			SessionID:  sessionID,
+			MessageID:  message.ID,
+			SenderID:   senderID,
+			SenderType: senderType,
+			SenderName: senderName,
+			Body:       req.Body,
+			Timestamp:  message.CreatedAt.Format(time.RFC3339),
+		}
+		s.broadcaster.BroadcastChatMessage(tenantID, payload)
+	}
+	
+	return &dto.ChatMessageResponse{
+		ID:        message.ID,
+		SessionID: message.SessionID,
+		// ... other fields
+	}, nil
+}
+
+// CLIENT-SIDE JAVASCRIPT EXAMPLE
+
+/*
+// 1. Connect to WebSocket
+const token = localStorage.getItem('jwt_token');
+const ws = new WebSocket(`wss://api.example.com/ws`);
+
+ws.onopen = () => {
+  console.log('WebSocket connected');
+  
+  // Subscribe to specific events
+  ws.send(JSON.stringify({
+    type: 'subscribe',
+    payload: {
+      events: [
+        'agent.state.changed',
+        'call.incoming',
+        'call.answered',
+        'call.ended',
+        'chat.message',
+        'queue.stats',
+        'notification'
+      ]
+    }
+  }));
+};
+
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  
+  switch(message.type) {
+    case 'agent.state.changed':
+      updateAgentStatus(message.payload);
+      break;
+      
+    case 'call.incoming':
+      showIncomingCall(message.payload);
+      playRingtone();
+      break;
+      
+    case 'call.answered':
+      updateCallStatus(message.payload.unique_id, 'answered');
+      break;
+      
+    case 'chat.message':
+      appendChatMessage(message.payload);
+      break;
+      
+    case 'queue.stats':
+      updateQueueDashboard(message.payload);
+      break;
+      
+    case 'notification':
+      showNotification(message.payload.title, message.payload.message);
+      break;
+  }
+};
+
+// Keepalive
+setInterval(() => {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'ping' }));
+  }
+}, 30000);
+*/
+
+// WEBHOOK RECEIVER EXAMPLE (External Service)
+
+/*
+// Node.js Express example for receiving webhooks
+
+const express = require('express');
+const crypto = require('crypto');
+const app = express();
+
+app.use(express.json());
+
+app.post('/webhook', (req, res) => {
+  // 1. Verify signature
+  const signature = req.headers['x-webhook-signature'];
+  const secret = 'your-webhook-secret';
+  
+  const hmac = crypto.createHmac('sha256', secret);
+  hmac.update(JSON.stringify(req.body));
+  const expectedSignature = hmac.digest('hex');
+  
+  if (signature !== expectedSignature) {
+    return res.status(401).send('Invalid signature');
+  }
+  
+  // 2. Process event
+  const { event, data, timestamp } = req.body;
+  
+  console.log(`Received event: ${event}`);
+  console.log(`Data:`, data);
+  
+  switch(event) {
+    case 'call.incoming':
+      // Send to Slack
+      sendToSlack(`📞 Incoming call from ${data.caller_id}`);
+      break;
+      
+    case 'agent.state.changed':
+      // Update external dashboard
+      updateDashboard(data.user_id, data.state);
+      break;
+      
+    case 'chat.message':
+      // Forward to CRM
+      createCRMActivity(data);
+      break;
+  }
+  
+  // 3. Return success
+  res.status(200).send('OK');
+});
+
+app.listen(3000);
+*/
+
+// WEBHOOK CONFIGURATION EXAMPLE (Database)
+
+/*
+-- Add webhook for Slack notifications
+INSERT INTO webhooks (tenant_id, name, url, events, secret, is_active, retry_count, timeout)
+VALUES (
+    'tenant-123',
+    'Slack Notifications',
+    'https://hooks.slack.com/services/YOUR/WEBHOOK/URL',
+    '["call.incoming", "call.missed", "agent.state.changed"]',
+    'slack-secret-key',
+    true,
+    3,
+    30
+);
+
+-- Add webhook for Zapier
+INSERT INTO webhooks (tenant_id, name, url, events, is_active)
+VALUES (
+    'tenant-123',
+    'Zapier Integration',
+    'https://hooks.zapier.com/hooks/catch/YOUR/WEBHOOK/ID',
+    '["call.ended", "chat.session.ended", "ticket.created"]',
+    true
+);
+
+-- Add webhook for custom CRM
+INSERT INTO webhooks (tenant_id, name, url, events, secret, is_active, retry_count)
+VALUES (
+    'tenant-123',
+    'CRM Integration',
+    'https://crm.example.com/api/webhooks/callcenter',
+    '["call.incoming", "call.ended", "chat.message", "ticket.created"]',
+    'crm-hmac-secret',
+    true,
+    5
+);
+*/
+
+// REDIS MONITORING EXAMPLES
+
+/*
+# Monitor all events
+redis-cli PSUBSCRIBE 'callcenter:*'
+
+# Check online users
+redis-cli SMEMBERS 'callcenter:online:tenant-123'
+
+# Check offline messages
+redis-cli LLEN 'callcenter:offline:tenant-123:456'
+redis-cli LRANGE 'callcenter:offline:tenant-123:456' 0 -1
+
+# Check presence
+redis-cli EXISTS 'callcenter:presence:tenant-123:456'
+*/
+
+// TESTING WEBHOOKS
+
+/*
+# Test webhook delivery with curl
+curl -X POST https://example.com/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Webhook-Event: webhook.test" \
+  -H "X-Webhook-Signature: calculated-hmac" \
+  -d '{
+    "event": "webhook.test",
+    "timestamp": 1729866000,
+    "data": {
+      "message": "Test webhook"
+    }
+  }'
+*/

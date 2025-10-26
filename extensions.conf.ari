@@ -1,0 +1,126 @@
+[general]
+static=yes
+writeprotect=no
+clearglobalvars=no
+
+[default]
+exten => s,1,NoOp(Default context)
+ same => n,Hangup()
+
+[from-twilio]
+; ============================================================================
+; TWILIO INCOMING CALLS - Two routing options:
+; ============================================================================
+; Option A (ACTIVE): Direct routing - works immediately, no backend needed
+;   - Rings extensions directly
+;   - Simple, reliable, low latency
+;   - Use for: basic call center, small teams
+;
+; Option B (COMMENTED): ARI routing - requires Go backend running
+;   - Database-driven routing (tenant/DID lookup)
+;   - Live dashboards, call control, screen pops
+;   - Use for: multi-tenant, advanced features, web UI control
+;
+; To switch: comment Option A, uncomment Option B, reload dialplan
+; ============================================================================
+
+; OPTION A: Direct routing (no backend needed)
+exten => _X.,1,NoOp(Inbound Twilio call to DID: ${EXTEN} from ${CALLERID(num)})
+ same => n,Set(DID=${EXTEN})
+ same => n,Answer()
+ same => n,Playback(hello-world)
+ same => n,Dial(PJSIP/100&PJSIP/101,30,tT)  ; Ring both extensions
+ same => n,GotoIf($["${DIALSTATUS}" = "BUSY"]?busy:unavail)
+ same => n(unavail),Voicemail(100@default,u)
+ same => n,Hangup()
+ same => n(busy),Voicemail(100@default,b)
+ same => n,Hangup()
+
+; OPTION B: ARI routing (requires Go backend)
+;exten => _X.,1,NoOp(Inbound Twilio call to DID: ${EXTEN} from ${CALLERID(num)})
+; same => n,Set(DID=${EXTEN})
+; same => n,Set(CALLERID(name)=${CALLERID(name)})
+; same => n,Stasis(callcenter,incoming,${DID})
+; same => n,Hangup()
+
+[outbound]
+; ============================================================================
+; OUTBOUND CALLS via Twilio SIP Trunk
+; ============================================================================
+; Dial 9 + phone number (e.g., 915551234 calls +15551234)
+; Works directly - no backend needed
+; Uses PJSIP trunk configured in pjsip.conf [twilio-na-us]
+; ============================================================================
+exten => _9.,1,NoOp(Outbound via Twilio: ${EXTEN})
+ same => n,Set(NUM=${EXTEN:1})
+ same => n,Set(CALLERID(num)=+19863334949)
+ same => n,Set(CALLERID(name)=CallCenter)
+ same => n,NoOp(Dialing ${NUM} from ${CALLERID(num)})
+ same => n,Dial(PJSIP/${NUM}@twilio-na-us,30)
+ same => n,Hangup()
+
+[internal]
+; ============================================================================
+; INTERNAL EXTENSION CALLS - Two routing options:
+; ============================================================================
+; Option A (ACTIVE): Direct dial pattern - works immediately
+;   - _1XX pattern matches extensions 100-199
+;   - Direct PJSIP dial, no backend needed
+;   - Use for: testing, simple deployments
+;
+; Option B (COMMENTED): ARI routing - requires Go backend
+;   - Specific extension entries (100, 101, etc.)
+;   - Backend handles call via Stasis application
+;   - Use for: call recording, monitoring, transfer, web control
+;
+; NOTE: In Asterisk, exact matches (100) take priority over patterns (_1XX)
+; To switch: comment _1XX pattern, uncomment specific extensions, reload
+; ============================================================================
+
+; OPTION A: Direct dial pattern (no backend needed)
+exten => _1XX,1,NoOp(Direct dial to extension ${EXTEN})
+ same => n,Dial(PJSIP/${EXTEN},30,tT)
+ same => n,Hangup()
+
+; OPTION B: ARI routing (requires Go backend)
+;exten => 100,1,NoOp(Calling extension 100 via ARI)
+; same => n,Stasis(callcenter,internal,100)
+; same => n,Hangup()
+
+;exten => 101,1,NoOp(Calling extension 101 via ARI)
+; same => n,Stasis(callcenter,internal,101)
+; same => n,Hangup()
+
+; Allow internal to make outbound calls
+include => outbound
+
+; Feature codes
+exten => *100,1,NoOp(Check voicemail for extension 100)
+ same => n,VoiceMailMain(100@default)
+ same => n,Hangup()
+
+exten => *101,1,NoOp(Check voicemail for extension 101)
+ same => n,VoiceMailMain(101@default)
+ same => n,Hangup()
+
+; Test echo
+exten => 600,1,NoOp(Echo test)
+ same => n,Answer()
+ same => n,Echo()
+ same => n,Hangup()
+
+; Test playback
+exten => 601,1,NoOp(Playback test)
+ same => n,Answer()
+ same => n,Playback(hello-world)
+ same => n,Wait(2)
+ same => n,Playback(tt-monkeys)
+ same => n,Hangup()
+
+[from-internal]
+; ============================================================================
+; Context alias for endpoints configured with context=from-internal
+; This includes all internal extensions and features
+; ============================================================================
+include => internal
+

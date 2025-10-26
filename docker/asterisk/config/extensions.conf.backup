@@ -1,0 +1,63 @@
+[general]
+static=yes
+writeprotect=no
+clearglobalvars=no
+
+[default]
+exten => s,1,NoOp(Default context)
+ same => n,Hangup()
+
+[from-twilio]
+; Route all incoming Twilio calls to ARI application
+exten => _X.,1,NoOp(Inbound Twilio call for ${EXTEN})
+ same => n,Set(DID=${EXTEN})
+ same => n,Set(CALLERID(name)=${CALLERID(name)})
+ same => n,Stasis(callcenter,incoming,${DID})
+ same => n,Hangup()
+
+[outbound]
+; Dial out via Twilio SIP trunk through ARI
+exten => _9.,1,NoOp(Outbound via Twilio: ${EXTEN})
+ same => n,Set(NUM=${EXTEN:1})
+ same => n,Set(CALLERID(num)=${TWILIO_ORIGINATING_NUMBER})
+ same => n,Set(CALLERID(name)=CallCenter)
+ same => n,NoOp(Dialing ${NUM} from ${CALLERID(num)})
+ same => n,Dial(PJSIP/${NUM}@twilio_trunk,30)
+ same => n,Hangup()
+
+[internal]
+; Internal softphone dialing through ARI
+exten => 100,1,NoOp(Calling extension 100)
+ same => n,Stasis(callcenter,internal,100)
+ same => n,Hangup()
+
+exten => 101,1,NoOp(Calling extension 101)
+ same => n,Stasis(callcenter,internal,101)
+ same => n,Hangup()
+
+; Allow internal to make outbound calls
+include => outbound
+
+; Feature codes
+exten => *100,1,NoOp(Check voicemail for extension 100)
+ same => n,VoiceMailMain(100@default)
+ same => n,Hangup()
+
+exten => *101,1,NoOp(Check voicemail for extension 101)
+ same => n,VoiceMailMain(101@default)
+ same => n,Hangup()
+
+; Test echo
+exten => 600,1,NoOp(Echo test)
+ same => n,Answer()
+ same => n,Echo()
+ same => n,Hangup()
+
+; Test playback
+exten => 601,1,NoOp(Playback test)
+ same => n,Answer()
+ same => n,Playback(hello-world)
+ same => n,Wait(2)
+ same => n,Playback(tt-monkeys)
+ same => n,Hangup()
+
