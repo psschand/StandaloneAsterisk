@@ -92,8 +92,10 @@ type ChatSession struct {
 
 	// Assignment
 	AssignedToID      *int64  `gorm:"column:assigned_to_id;index:idx_assigned" json:"assigned_to_id,omitempty" example:"1"`
+	AssignedToName    *string `gorm:"-" json:"assigned_to_name,omitempty"` // Computed field
 	AssignedTeam      *string `gorm:"column:assigned_team;type:varchar(100)" json:"assigned_team,omitempty" example:"Support Team"`
 	FirstResponseTime *int    `gorm:"column:first_response_time" json:"first_response_time,omitempty" example:"45"` // seconds
+	MessageCount      int     `gorm:"column:message_count;default:0" json:"message_count" example:"5"`
 
 	// Timing
 	QueuedAt  *time.Time `gorm:"column:queued_at" json:"queued_at,omitempty"`

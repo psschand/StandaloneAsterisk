@@ -1,0 +1,22 @@
+<!-- 512x512 PWA Icon -->
+<svg width="512" height="512" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4f46e5;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="512" height="512" rx="100" fill="url(#grad2)"/>
+  
+  <!-- Phone icon -->
+  <path d="M256 64c-70.7 0-128 57.3-128 128 0 29.3 10.7 56 28 76.8L96 336l64 64 67.2-60c20.8 17.3 47.5 28 76.8 28 70.7 0 128-57.3 128-128S326.7 64 256 64zm0 192c-35.3 0-64-28.7-64-64s28.7-64 64-64 64 28.7 64 64-28.7 64-64 64z" 
+        fill="white" 
+        transform="translate(64, 64)"/>
+  
+  <!-- Chat bubble -->
+  <circle cx="320" cy="200" r="80" fill="white" opacity="0.95"/>
+  <path d="M320 160 L340 180 L360 160 L360 180 L340 200 L360 220 L360 200 L340 220 L320 200 Z" fill="#4f46e5"/>
+  <text x="320" y="220" font-size="48" text-anchor="middle" fill="#4f46e5">💬</text>
+</svg>

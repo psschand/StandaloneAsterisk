@@ -28,6 +28,7 @@ type ChatService interface {
 	GetSessionsByTenant(ctx context.Context, tenantID string, page, pageSize int) ([]dto.ChatSessionResponse, int64, error)
 	GetActiveSessions(ctx context.Context, tenantID string) ([]dto.ChatSessionResponse, error)
 	AssignSession(ctx context.Context, sessionID, agentID int64) error
+	UnassignSession(ctx context.Context, sessionID int64) error
 	EndSession(ctx context.Context, sessionID int64, rating *int) error
 
 	// Message management
@@ -46,6 +47,9 @@ type ChatService interface {
 
 	// Statistics
 	GetChatStats(ctx context.Context, tenantID string, start, end time.Time) (*dto.ChatStatsResponse, error)
+
+	// WebSocket
+	SetWebSocketHub(hub WebSocketHub)
 }
 
 type chatService struct {
@@ -55,6 +59,13 @@ type chatService struct {
 	agentRepo    repository.ChatAgentRepository
 	transferRepo repository.ChatTransferRepository
 	userRepo     repository.UserRepository
+	wsHub        WebSocketHub
+}
+
+// WebSocketHub interface for broadcasting messages
+type WebSocketHub interface {
+	BroadcastToTenant(tenantID string, messageType string, payload interface{})
+	BroadcastToUser(tenantID string, userID int64, messageType string, payload interface{})
 }
 
 // NewChatService creates a new chat service
@@ -73,7 +84,13 @@ func NewChatService(
 		agentRepo:    agentRepo,
 		transferRepo: transferRepo,
 		userRepo:     userRepo,
+		wsHub:        nil, // Will be set via SetWebSocketHub
 	}
+}
+
+// SetWebSocketHub sets the WebSocket hub for real-time updates
+func (s *chatService) SetWebSocketHub(hub WebSocketHub) {
+	s.wsHub = hub
 }
 
 // CreateWidget creates a new chat widget
@@ -130,11 +147,15 @@ func (s *chatService) UpdateWidget(ctx context.Context, id int64, req *dto.Updat
 		return nil, errors.NewNotFound("widget not found")
 	}
 
+	// Update basic fields
 	if req.Name != nil && *req.Name != "" {
 		widget.Name = *req.Name
 	}
-	if req.WelcomeMessage != nil && *req.WelcomeMessage != "" {
+	if req.WelcomeMessage != nil {
 		widget.WelcomeMessage = *req.WelcomeMessage
+	}
+	if req.GreetingMessage != nil {
+		widget.WelcomeMessage = *req.GreetingMessage // Frontend uses greeting_message
 	}
 	if req.PrimaryColor != nil {
 		widget.PrimaryColor = *req.PrimaryColor
@@ -144,6 +165,12 @@ func (s *chatService) UpdateWidget(ctx context.Context, id int64, req *dto.Updat
 	}
 	if req.WidgetPosition != nil {
 		widget.WidgetPosition = *req.WidgetPosition
+	}
+	if req.Position != nil {
+		widget.WidgetPosition = *req.Position // Alias
+	}
+	if req.PlaceholderText != nil {
+		widget.PlaceholderText = *req.PlaceholderText
 	}
 	if req.IsEnabled != nil {
 		widget.IsEnabled = *req.IsEnabled
@@ -157,8 +184,130 @@ func (s *chatService) UpdateWidget(ctx context.Context, id int64, req *dto.Updat
 	if req.AllowFileUpload != nil {
 		widget.AllowFileUpload = *req.AllowFileUpload
 	}
+	if req.EnableFileUpload != nil {
+		widget.AllowFileUpload = *req.EnableFileUpload // Alias
+	}
 	if req.RequireEmail != nil {
 		widget.RequireEmail = *req.RequireEmail
+	}
+	if req.RequireName != nil {
+		widget.RequireName = *req.RequireName
+	}
+	if req.DefaultTeam != nil {
+		widget.DefaultTeam = req.DefaultTeam
+	}
+	if req.OfflineMessage != nil {
+		widget.OfflineMessage = req.OfflineMessage
+	}
+
+	// Store extended configuration in settings JSON
+	if widget.Metadata == nil {
+		widget.Metadata = make(common.JSONMap)
+	}
+
+	// Store all extended fields in metadata/settings
+	if req.TeamName != nil {
+		widget.Metadata["team_name"] = *req.TeamName
+	}
+	if req.CompanyName != nil {
+		widget.Metadata["company_name"] = *req.CompanyName
+	}
+	if req.ShowAgentAvatar != nil {
+		widget.Metadata["show_agent_avatar"] = *req.ShowAgentAvatar
+	}
+	if req.ShowAgentName != nil {
+		widget.Metadata["show_agent_name"] = *req.ShowAgentName
+	}
+	if req.EnablePreChatForm != nil {
+		widget.Metadata["enable_pre_chat_form"] = *req.EnablePreChatForm
+	}
+	if req.PreChatFields != nil {
+		widget.Metadata["pre_chat_fields"] = *req.PreChatFields
+	}
+	if req.EnableProactiveChat != nil {
+		widget.Metadata["enable_proactive_chat"] = *req.EnableProactiveChat
+	}
+	if req.ProactiveDelay != nil {
+		widget.Metadata["proactive_delay"] = *req.ProactiveDelay
+	}
+	if req.ProactiveMessage != nil {
+		widget.Metadata["proactive_message"] = *req.ProactiveMessage
+	}
+	if req.ShowUnreadCount != nil {
+		widget.Metadata["show_unread_count"] = *req.ShowUnreadCount
+	}
+	if req.EnableSound != nil {
+		widget.Metadata["enable_sound"] = *req.EnableSound
+	}
+	if req.EnableTypingIndicator != nil {
+		widget.Metadata["enable_typing_indicator"] = *req.EnableTypingIndicator
+	}
+	if req.EnableEmoji != nil {
+		widget.Metadata["enable_emoji"] = *req.EnableEmoji
+	}
+	if req.EnableQuickReplies != nil {
+		widget.Metadata["enable_quick_replies"] = *req.EnableQuickReplies
+	}
+	if req.QuickReplies != nil {
+		widget.Metadata["quick_replies"] = *req.QuickReplies
+	}
+	if req.EnableRating != nil {
+		widget.Metadata["enable_rating"] = *req.EnableRating
+	}
+	if req.ShowChatHistory != nil {
+		widget.Metadata["show_chat_history"] = *req.ShowChatHistory
+	}
+	// Sales & Marketing
+	if req.EnableProductShowcase != nil {
+		widget.Metadata["enable_product_showcase"] = *req.EnableProductShowcase
+	}
+	if req.ShowcaseProducts != nil {
+		widget.Metadata["showcase_products"] = *req.ShowcaseProducts
+	}
+	if req.EnableLeadCapture != nil {
+		widget.Metadata["enable_lead_capture"] = *req.EnableLeadCapture
+	}
+	if req.LeadCaptureTrigger != nil {
+		widget.Metadata["lead_capture_trigger"] = *req.LeadCaptureTrigger
+	}
+	if req.LeadCaptureDelay != nil {
+		widget.Metadata["lead_capture_delay"] = *req.LeadCaptureDelay
+	}
+	// AI Features
+	if req.EnableAISuggestions != nil {
+		widget.Metadata["enable_ai_suggestions"] = *req.EnableAISuggestions
+	}
+	if req.EnableSmartReplies != nil {
+		widget.Metadata["enable_smart_replies"] = *req.EnableSmartReplies
+	}
+	if req.EnableSentimentAnalysis != nil {
+		widget.Metadata["enable_sentiment_analysis"] = *req.EnableSentimentAnalysis
+	}
+	if req.EnableSatisfactionSurvey != nil {
+		widget.Metadata["enable_satisfaction_survey"] = *req.EnableSatisfactionSurvey
+	}
+	if req.EnableChatTranscript != nil {
+		widget.Metadata["enable_chat_transcript"] = *req.EnableChatTranscript
+	}
+	// Branding
+	if req.CompanyLogo != nil {
+		widget.Metadata["company_logo"] = *req.CompanyLogo
+	}
+	if req.WelcomeImage != nil {
+		widget.Metadata["welcome_image"] = *req.WelcomeImage
+	}
+	if req.Favicon != nil {
+		widget.Metadata["favicon"] = *req.Favicon
+	}
+	// Analytics
+	if req.TrackVisitorInfo != nil {
+		widget.Metadata["track_visitor_info"] = *req.TrackVisitorInfo
+	}
+	if req.TrackPageViews != nil {
+		widget.Metadata["track_page_views"] = *req.TrackPageViews
+	}
+	if req.TrackReferrer != nil {
+		widget.Metadata["track_referrer"] = *req.TrackReferrer
 	}
 
 	widget.UpdatedAt = time.Now()
@@ -300,6 +449,76 @@ func (s *chatService) AssignSession(ctx context.Context, sessionID, agentID int6
 		return errors.Wrap(err, "failed to update agent")
 	}
 
+	// Broadcast session assigned via WebSocket
+	if s.wsHub != nil {
+		// Get agent user details
+		agentName := ""
+		user, _ := s.userRepo.FindByID(ctx, agent.UserID)
+		if user != nil && user.FirstName != nil && user.LastName != nil {
+			agentName = *user.FirstName + " " + *user.LastName
+		}
+
+		payload := map[string]interface{}{
+			"session_id": sessionID,
+			"agent_id":   agent.UserID,
+			"agent_name": agentName,
+			"status":     session.Status,
+		}
+
+		// Broadcast to tenant (all monitoring agents)
+		s.wsHub.BroadcastToTenant(session.TenantID, "chat.session.assigned", payload)
+
+		// Notify assigned agent specifically
+		s.wsHub.BroadcastToUser(session.TenantID, agent.UserID, "chat.agent.joined", payload)
+	}
+
+	return nil
+}
+
+// UnassignSession unassigns a session from an agent (transfers to queue)
+func (s *chatService) UnassignSession(ctx context.Context, sessionID int64) error {
+	// Get session
+	session, err := s.sessionRepo.FindByID(ctx, sessionID)
+	if err != nil {
+		return errors.NewNotFound("session not found")
+	}
+
+	// Get current agent ID before unassigning
+	var currentAgentID *int64
+	if session.AssignedToID != nil {
+		currentAgentID = session.AssignedToID
+	}
+
+	// Update session to unassigned/queued status
+	session.AssignedToID = nil
+	session.Status = common.ChatSessionStatusQueued
+	session.UpdatedAt = time.Now()
+
+	if err := s.sessionRepo.Update(ctx, session); err != nil {
+		return errors.Wrap(err, "failed to unassign session")
+	}
+
+	// If was assigned, update agent current chats count
+	if currentAgentID != nil {
+		agent, err := s.agentRepo.FindByUser(ctx, session.TenantID, *currentAgentID)
+		if err == nil && agent != nil {
+			if agent.CurrentChats > 0 {
+				agent.CurrentChats--
+			}
+			agent.UpdatedAt = time.Now()
+			s.agentRepo.Update(ctx, agent)
+		}
+	}
+
+	// Broadcast session unassigned via WebSocket
+	if s.wsHub != nil {
+		payload := map[string]interface{}{
+			"session_id": sessionID,
+			"status":     session.Status,
+		}
+		s.wsHub.BroadcastToTenant(session.TenantID, "chat.session.unassigned", payload)
+	}
+
 	return nil
 }
 
@@ -375,6 +594,20 @@ func (s *chatService) SendMessage(ctx context.Context, sessionID int64, senderID
 		session.FirstResponseTime = &responseTime
 		session.UpdatedAt = now
 		s.sessionRepo.Update(ctx, session)
+	}
+
+	// Broadcast new message via WebSocket
+	if s.wsHub != nil {
+		payload := map[string]interface{}{
+			"session_id":   sessionID,
+			"message_id":   message.ID,
+			"sender_type":  senderType,
+			"sender_name":  senderName,
+			"message_type": message.MessageType,
+			"body":         message.Body,
+			"timestamp":    message.CreatedAt,
+		}
+		s.wsHub.BroadcastToTenant(session.TenantID, "chat.message.new", payload)
 	}
 
 	return s.toMessageResponse(message), nil
@@ -599,22 +832,35 @@ func (s *chatService) generateSessionKey() string {
 }
 
 func (s *chatService) toWidgetResponse(widget *chat.ChatWidget) *dto.ChatWidgetResponse {
-	return &dto.ChatWidgetResponse{
+	response := &dto.ChatWidgetResponse{
 		ID:               widget.ID,
 		TenantID:         widget.TenantID,
 		Name:             widget.Name,
 		WidgetKey:        widget.WidgetKey,
 		WelcomeMessage:   widget.WelcomeMessage,
+		GreetingMessage:  widget.WelcomeMessage, // Alias for frontend
 		PrimaryColor:     widget.PrimaryColor,
 		SecondaryColor:   widget.SecondaryColor,
 		WidgetPosition:   widget.WidgetPosition,
+		Position:         widget.WidgetPosition, // Alias
+		PlaceholderText:  widget.PlaceholderText,
 		ShowAgentTyping:  widget.ShowAgentTyping,
 		ShowReadReceipts: widget.ShowReadReceipts,
 		AllowFileUpload:  widget.AllowFileUpload,
+		EnableFileUpload: widget.AllowFileUpload, // Alias
+		RequireEmail:     widget.RequireEmail,
+		RequireName:      widget.RequireName,
 		IsEnabled:        widget.IsEnabled,
 		CreatedAt:        widget.CreatedAt,
 		UpdatedAt:        widget.UpdatedAt,
 	}
+
+	// Flatten metadata into main response for frontend compatibility
+	if widget.Metadata != nil {
+		response.Settings = widget.Metadata
+	}
+
+	return response
 }
 
 func (s *chatService) toSessionResponse(session *chat.ChatSession) *dto.ChatSessionResponse {
@@ -639,8 +885,8 @@ func (s *chatService) toSessionResponse(session *chat.ChatSession) *dto.ChatSess
 		}
 	}
 
-	// Count messages (if needed, else set to 0)
-	messageCount := 0
+	// Use message count from session
+	messageCount := session.MessageCount
 
 	return &dto.ChatSessionResponse{
 		ID:                session.ID,

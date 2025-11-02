@@ -26,8 +26,8 @@ type Tenant struct {
 	UpdatedAt          time.Time             `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 
 	// Relations (not stored in DB)
-	Users []User        `gorm:"foreignKey:TenantID" json:"users,omitempty"`
-	DIDs  []interface{} `gorm:"foreignKey:TenantID" json:"dids,omitempty"` // Circular import - use interface{}
+	// Users []User        `gorm:"foreignKey:TenantID" json:"users,omitempty"` // Commented out - users don't have direct tenant_id
+	// DIDs  []interface{} `gorm:"foreignKey:TenantID" json:"dids,omitempty"` // Commented out - circular import
 }
 
 // TableName specifies the table name

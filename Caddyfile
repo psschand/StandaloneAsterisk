@@ -1,0 +1,44 @@
+{
+    # Global options
+    auto_https off
+}
+
+# Main server on port 8443 - Backend API only
+# CORS is handled by the backend Go application
+:8443 {
+    # Backend API - proxy to containerized backend
+    handle /api/* {
+        reverse_proxy backend:8001
+    }
+
+    # WebSocket for backend
+    handle /ws* {
+        reverse_proxy backend:8001
+    }
+
+    # Adminer database management
+    handle /adminer* {
+        reverse_proxy adminer:8080
+    }
+
+    # Health check endpoint
+    handle /health {
+        respond "OK" 200
+    }
+
+    # Root endpoint - API info
+    handle / {
+        respond "CallCenter Backend API - Healthy" 200
+    }
+
+    # Catch all - redirect to API docs or return 404
+    handle {
+        respond "CallCenter Backend API - Use /api/v1 endpoints" 404
+    }
+
+    # Logs
+    log {
+        output stdout
+        format json
+    }
+}

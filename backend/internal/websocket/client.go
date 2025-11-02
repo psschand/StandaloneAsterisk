@@ -35,10 +35,11 @@ type Client struct {
 	send chan []byte
 
 	// Client metadata
-	ID       string
-	TenantID string
-	UserID   int64
-	Role     string
+	ID        string
+	TenantID  string
+	UserID    int64
+	Role      string
+	SessionID int64 // Chat session ID (for visitor connections)
 
 	// Subscribed event types
 	subscriptions map[MessageType]bool
@@ -50,7 +51,7 @@ type Client struct {
 }
 
 // NewClient creates a new WebSocket client
-func NewClient(conn *websocket.Conn, hub *Hub, tenantID string, userID int64, role string) *Client {
+func NewClient(conn *websocket.Conn, hub *Hub, tenantID string, userID int64, role string, sessionID int64) *Client {
 	return &Client{
 		conn:          conn,
 		hub:           hub,
@@ -59,6 +60,7 @@ func NewClient(conn *websocket.Conn, hub *Hub, tenantID string, userID int64, ro
 		TenantID:      tenantID,
 		UserID:        userID,
 		Role:          role,
+		SessionID:     sessionID,
 		subscriptions: make(map[MessageType]bool),
 		isAlive:       true,
 	}
@@ -161,7 +163,16 @@ func (c *Client) handleIncomingMessage(msg *Message) {
 			log.Printf("Failed to parse subscribe payload: %v", err)
 			return
 		}
-		c.Subscribe(payload.Events...)
+		// Support both 'events' and 'topics' field names
+		events := payload.Events
+		if len(events) == 0 && len(payload.Topics) > 0 {
+			// Convert string topics to MessageType
+			for _, topic := range payload.Topics {
+				events = append(events, MessageType(topic))
+			}
+		}
+		log.Printf("[Subscribe] Client %s subscribing to: %v", c.ID, events)
+		c.Subscribe(events...)
 
 	case MessageTypeUnsubscribe:
 		var payload SubscribePayload
@@ -169,7 +180,15 @@ func (c *Client) handleIncomingMessage(msg *Message) {
 			log.Printf("Failed to parse unsubscribe payload: %v", err)
 			return
 		}
-		c.Unsubscribe(payload.Events...)
+		// Support both 'events' and 'topics' field names
+		events := payload.Events
+		if len(events) == 0 && len(payload.Topics) > 0 {
+			// Convert string topics to MessageType
+			for _, topic := range payload.Topics {
+				events = append(events, MessageType(topic))
+			}
+		}
+		c.Unsubscribe(events...)
 
 	case MessageTypeChatTyping:
 		// Broadcast typing indicator to other clients in the same session

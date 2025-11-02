@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"log"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -57,26 +58,41 @@ func CORS(cfg *config.Config) gin.HandlerFunc {
 // Auth middleware validates JWT tokens
 func Auth(jwtService *jwt.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		log.Printf("========== [Auth Middleware] Called for path: %s ==========", c.Request.URL.Path)
+		// Try to get token from Authorization header first
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			response.Unauthorized(c, "Authorization header is required")
-			c.Abort()
-			return
-		}
+		var tokenString string
+		var err error
 
-		tokenString, err := jwt.ExtractToken(authHeader)
-		if err != nil {
-			response.Unauthorized(c, "Invalid authorization header format")
-			c.Abort()
-			return
+		if authHeader != "" {
+			tokenString, err = jwt.ExtractToken(authHeader)
+			if err != nil {
+				log.Printf("[Auth] Error extracting token from header: %v", err)
+				response.Unauthorized(c, "Invalid authorization header format")
+				c.Abort()
+				return
+			}
+		} else {
+			// For WebSocket connections, try to get token from query parameter
+			tokenString = c.Query("token")
+			if tokenString == "" {
+				log.Printf("[Auth] No token found in header or query parameter for path: %s", c.Request.URL.Path)
+				response.Unauthorized(c, "Authorization required")
+				c.Abort()
+				return
+			}
+			log.Printf("[Auth] Using token from query parameter for path: %s", c.Request.URL.Path)
 		}
 
 		claims, err := jwtService.ValidateAccessToken(tokenString)
 		if err != nil {
+			log.Printf("[Auth] Token validation failed for path %s: %v", c.Request.URL.Path, err)
 			response.Unauthorized(c, "Invalid or expired token")
 			c.Abort()
 			return
 		}
+
+		log.Printf("[Auth] Token validated successfully for user %d on path: %s", claims.UserID, c.Request.URL.Path)
 
 		// Set user info in context
 		c.Set("user_id", claims.UserID)

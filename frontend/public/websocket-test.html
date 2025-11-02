@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Chat Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .messages {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 20px 0;
+            background: #f9f9f9;
+        }
+        .message {
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 5px;
+        }
+        .message.visitor {
+            background: #e3f2fd;
+            text-align: right;
+        }
+        .message.agent {
+            background: #fff3cd;
+        }
+        .message.system {
+            background: #e0e0e0;
+            font-style: italic;
+            text-align: center;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px;
+        }
+        input {
+            width: 60%;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Chat Test</h1>
+    
+    <div id="status" class="status disconnected">Disconnected</div>
+    
+    <div class="info">
+        <strong>Session ID:</strong> <span id="sessionId">Not created</span><br>
+        <strong>WebSocket State:</strong> <span id="wsState">Not connected</span>
+    </div>
+    
+    <div class="controls">
+        <button id="startBtn" onclick="startSession()">Start Session</button>
+        <button id="connectBtn" onclick="connectWebSocket()" disabled>Connect WebSocket</button>
+    </div>
+    
+    <div class="controls">
+        <input type="text" id="messageInput" placeholder="Type a message..." disabled>
+        <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+    </div>
+    
+    <div class="messages" id="messages"></div>
+    
+    <script>
+        let sessionId = null;
+        let sessionKey = null;
+        let ws = null;
+        const API_BASE = 'http://localhost:8443/api/v1/chat/public';
+        const WS_BASE = 'ws://localhost:8443/ws/public';
+        
+        function log(message, type = 'system') {
+            const messagesDiv = document.getElementById('messages');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${type}`;
+            msgDiv.textContent = message;
+            messagesDiv.appendChild(msgDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        async function startSession() {
+            try {
+                const response = await fetch(`${API_BASE}/start`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        tenant_id: 'demo-tenant',
+                        channel: 'web_widget',
+                        customer_name: 'WebSocket Tester',
+                        customer_email: 'test@ws.com'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success && data.data) {
+                    sessionId = data.data.session_id;
+                    sessionKey = data.data.session_key;
+                    document.getElementById('sessionId').textContent = sessionId;
+                    document.getElementById('startBtn').disabled = true;
+                    document.getElementById('connectBtn').disabled = false;
+                    log(`Session created: ${sessionId}`, 'system');
+                } else {
+                    log('Failed to create session: ' + JSON.stringify(data.error), 'system');
+                }
+            } catch (error) {
+                log('Error creating session: ' + error.message, 'system');
+            }
+        }
+        
+        function connectWebSocket() {
+            if (!sessionKey) {
+                log('No session key available', 'system');
+                return;
+            }
+            
+            const wsUrl = `${WS_BASE}/${sessionKey}`;
+            log(`Connecting to: ${wsUrl}`, 'system');
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                document.getElementById('status').textContent = 'Connected';
+                document.getElementById('status').className = 'status connected';
+                document.getElementById('wsState').textContent = 'Connected';
+                document.getElementById('messageInput').disabled = false;
+                document.getElementById('sendBtn').disabled = false;
+                log('WebSocket connected!', 'system');
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    log(`Received: ${data.type} - ${JSON.stringify(data.payload)}`, 'system');
+                    
+                    if (data.type === 'chat.message.new') {
+                        const payload = data.payload;
+                        log(`${payload.sender_name}: ${payload.body}`, payload.sender_type);
+                    }
+                } catch (error) {
+                    log('Error parsing message: ' + error.message, 'system');
+                }
+            };
+            
+            ws.onerror = (error) => {
+                log('WebSocket error: ' + error.message, 'system');
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('status').textContent = 'Disconnected';
+                document.getElementById('status').className = 'status disconnected';
+                document.getElementById('wsState').textContent = 'Disconnected';
+                document.getElementById('messageInput').disabled = true;
+                document.getElementById('sendBtn').disabled = true;
+                log('WebSocket disconnected', 'system');
+            };
+        }
+        
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            
+            if (!message || !sessionId) return;
+            
+            try {
+                log(`You: ${message}`, 'visitor');
+                input.value = '';
+                
+                const response = await fetch(`${API_BASE}/message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        message: message,
+                        metadata: { test: 'true' }
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success && data.data) {
+                    log(`AI: ${data.data.content}`, 'agent');
+                } else {
+                    log('Error sending message: ' + JSON.stringify(data.error), 'system');
+                }
+            } catch (error) {
+                log('Error: ' + error.message, 'system');
+            }
+        }
+        
+        document.getElementById('messageInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>

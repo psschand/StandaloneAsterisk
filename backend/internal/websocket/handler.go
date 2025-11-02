@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -18,15 +19,28 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// ChatSession is a simple struct to avoid import cycles
+type ChatSession struct {
+	ID       int64
+	TenantID string
+}
+
+// ChatSessionGetter interface to avoid import cycle
+type ChatSessionGetter interface {
+	GetSessionByKey(ctx context.Context, sessionKey string) (*ChatSession, error)
+}
+
 // Handler handles WebSocket connection requests
 type Handler struct {
-	hub *Hub
+	hub         *Hub
+	chatService ChatSessionGetter
 }
 
 // NewHandler creates a new WebSocket handler
-func NewHandler(hub *Hub) *Handler {
+func NewHandler(hub *Hub, chatService ChatSessionGetter) *Handler {
 	return &Handler{
-		hub: hub,
+		hub:         hub,
+		chatService: chatService,
 	}
 }
 
@@ -58,13 +72,14 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	// Create new client
+	// Create new client (agents don't have session filtering)
 	client := NewClient(
 		conn,
 		h.hub,
 		tenantID.(string),
 		userID.(int64),
 		roleStr,
+		0, // sessionID = 0 for agents (see all sessions)
 	)
 
 	// Register client with hub
@@ -77,22 +92,20 @@ func (h *Handler) HandleWebSocket(c *gin.Context) {
 
 // HandleWebSocketPublic handles public WebSocket connections (for chat widgets)
 func (h *Handler) HandleWebSocketPublic(c *gin.Context) {
-	// Get widget key from query params
-	widgetKey := c.Query("widget_key")
-	if widgetKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing widget_key"})
-		return
-	}
-
-	sessionKey := c.Query("session_key")
+	// Get session KEY from URL parameter (e.g., "session-1762087398688217608")
+	sessionKey := c.Param("sessionId")
 	if sessionKey == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing session_key"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing session_id"})
 		return
 	}
 
-	// TODO: Validate widget_key and get tenant_id from database
-	// For now, using a placeholder
-	tenantID := "public_" + widgetKey
+	// Get session from database to get tenant_id and numeric session ID
+	session, err := h.chatService.GetSessionByKey(c.Request.Context(), sessionKey)
+	if err != nil {
+		log.Printf("Failed to get session %s: %v", sessionKey, err)
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
 
 	// Upgrade HTTP connection to WebSocket
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -101,18 +114,22 @@ func (h *Handler) HandleWebSocketPublic(c *gin.Context) {
 		return
 	}
 
-	// Create new client for visitor (userID = 0 for visitors)
+	log.Printf("[WebSocket] Public connection established for session %d (key: %s, tenant: %s)", session.ID, sessionKey, session.TenantID)
+
+	// Create new client for visitor with session ID
 	client := NewClient(
 		conn,
 		h.hub,
-		tenantID,
-		0,
+		session.TenantID,
+		0, // userID = 0 for visitors
 		"visitor",
+		session.ID, // Pass session ID for message filtering
 	)
 
 	// Subscribe to chat events only
 	client.Subscribe(
 		MessageTypeChatMessage,
+		MessageTypeChatMessageNew, // Subscribe to new messages
 		MessageTypeChatSessionStarted,
 		MessageTypeChatSessionEnded,
 		MessageTypeChatTyping,

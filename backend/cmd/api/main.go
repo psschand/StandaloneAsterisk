@@ -13,6 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/psschand/callcenter/internal/asterisk"
+	"github.com/psschand/callcenter/internal/chat"
 	"github.com/psschand/callcenter/internal/config"
 	"github.com/psschand/callcenter/internal/database"
 	"github.com/psschand/callcenter/internal/handler"
@@ -23,6 +24,22 @@ import (
 	"github.com/psschand/callcenter/pkg/jwt"
 	"github.com/psschand/callcenter/pkg/response"
 )
+
+// chatSessionAdapter adapts ChatService to ws.ChatSessionGetter to avoid import cycle
+type chatSessionAdapter struct {
+	chatService service.ChatService
+}
+
+func (a *chatSessionAdapter) GetSessionByKey(ctx context.Context, sessionKey string) (*ws.ChatSession, error) {
+	session, err := a.chatService.GetSessionByKey(ctx, sessionKey)
+	if err != nil {
+		return nil, err
+	}
+	return &ws.ChatSession{
+		ID:       session.ID,
+		TenantID: session.TenantID,
+	}, nil
+}
 
 func main() {
 	// Load configuration
@@ -101,8 +118,9 @@ func main() {
 	log.Println("Webhook manager started with 10 workers")
 
 	// Initialize event broadcaster (broadcasts to WebSocket AND webhooks)
-	broadcaster := ws.NewEventWebhookBroadcaster(hub, webhookManager, webhookRepo)
-	log.Println("Event broadcaster initialized (WebSocket + Webhooks)")
+	// broadcaster := ws.NewEventWebhookBroadcaster(hub, webhookManager, webhookRepo)
+	// log.Println("Event broadcaster initialized (WebSocket + Webhooks)")
+	_ = webhookRepo // Mark as intentionally unused for now
 
 	// Initialize Asterisk ARI client and handler
 	ariClient := asterisk.NewARIClient(
@@ -142,6 +160,21 @@ func main() {
 	ticketService := service.NewTicketService(ticketRepo, ticketMessageRepo, contactRepo, userRepo)
 	chatService := service.NewChatService(chatWidgetRepo, chatSessionRepo, chatMessageRepo, chatAgentRepo, chatTransferRepo, userRepo)
 
+	// Set WebSocket hub for real-time chat updates
+	hubAdapter := ws.NewHubAdapter(hub)
+	chatService.SetWebSocketHub(hubAdapter)
+	log.Println("Chat service configured with WebSocket support")
+
+	// Initialize AI Chat Services (Gemini + RAG)
+	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
+	if geminiAPIKey == "" {
+		log.Printf("Warning: GEMINI_API_KEY not set - AI chat features will be disabled")
+	}
+	aiAgentService := chat.NewAIAgentService(db, geminiAPIKey)
+	aiChatService := chat.NewChatService(db, aiAgentService)
+	knowledgeBaseService := chat.NewKnowledgeBaseService(db, aiAgentService)
+	log.Println("AI Chat services initialized (Gemini + RAG)")
+
 	log.Println("Services initialized")
 
 	// Initialize handlers
@@ -155,7 +188,16 @@ func main() {
 	ticketHandler := handler.NewTicketHandler(ticketService)
 	chatHandler := handler.NewChatHandler(chatService)
 	webhookHandler := handler.NewWebhookHandler(webhookRepo, webhookManager)
-	wsHandler := ws.NewHandler(hub)
+
+	// Create adapter for WebSocket handler to avoid import cycle
+	chatSessionAdapter := &chatSessionAdapter{chatService: chatService}
+	wsHandler := ws.NewHandler(hub, chatSessionAdapter)
+
+	// AI Chat handlers
+	knowledgeBaseHandler := handler.NewKnowledgeBaseHandler(knowledgeBaseService)
+	publicChatHandler := handler.NewPublicChatHandler(chatService, aiAgentService)
+	// aiChatService will use aiChatService when we add conversation endpoints
+	_ = aiChatService // Mark as used for now
 
 	log.Println("Handlers initialized")
 
@@ -198,6 +240,17 @@ func main() {
 			auth.POST("/login", authHandler.Login)
 			auth.POST("/refresh", authHandler.RefreshToken)
 			auth.POST("/reset-password-request", authHandler.ResetPasswordRequest)
+		}
+
+		// Public chat routes (no auth required)
+		publicChat := v1.Group("/chat/public")
+		{
+			publicChat.POST("/start", publicChatHandler.StartSession)
+			publicChat.POST("/message", publicChatHandler.SendMessage)
+			publicChat.POST("/handover", publicChatHandler.RequestHandover)
+			publicChat.POST("/end", publicChatHandler.EndSession)
+			publicChat.GET("/session/:session_id", publicChatHandler.GetSessionHistory)
+			publicChat.GET("/status/:session_id", publicChatHandler.GetSessionStatus)
 		}
 
 		// Protected auth routes
@@ -333,7 +386,7 @@ func main() {
 				chat.POST("/sessions/:id/transfer", chatHandler.TransferSession)
 
 				// Message management
-				chat.POST("/messages", chatHandler.SendMessage)
+				chat.POST("/sessions/:id/messages", chatHandler.SendMessage)
 				chat.GET("/sessions/:id/messages", chatHandler.GetMessages)
 				chat.POST("/messages/:messageId/read", chatHandler.MarkMessageAsRead)
 
@@ -344,6 +397,24 @@ func main() {
 
 				// Statistics
 				chat.GET("/stats", chatHandler.GetStats)
+			}
+
+			// AI Chat - Knowledge Base routes (Admin only for now)
+			kb := protected.Group("/knowledge-base")
+			{
+				kb.POST("", knowledgeBaseHandler.CreateEntry)
+				kb.GET("", knowledgeBaseHandler.ListEntries)
+				kb.GET("/search", knowledgeBaseHandler.SearchEntries)
+				kb.GET("/categories", knowledgeBaseHandler.GetCategories)
+				kb.GET("/stats", knowledgeBaseHandler.GetStats)
+				kb.POST("/test", knowledgeBaseHandler.TestQuery)
+				kb.POST("/import", knowledgeBaseHandler.BulkImport)
+				kb.POST("/upload", knowledgeBaseHandler.UploadDocument) // Document upload
+				kb.GET("/export", knowledgeBaseHandler.Export)
+				kb.GET("/:id", knowledgeBaseHandler.GetEntry)
+				kb.PUT("/:id", knowledgeBaseHandler.UpdateEntry)
+				kb.DELETE("/:id", knowledgeBaseHandler.DeleteEntry)
+				kb.POST("/:id/helpful", knowledgeBaseHandler.MarkHelpful)
 			}
 
 			// Webhook routes

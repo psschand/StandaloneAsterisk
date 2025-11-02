@@ -32,11 +32,14 @@ const (
 	MessageTypeMemberUnpaused MessageType = "queue.member.unpaused"
 
 	// Chat Events
-	MessageTypeChatSessionStarted MessageType = "chat.session.started"
-	MessageTypeChatMessage        MessageType = "chat.message"
-	MessageTypeChatSessionEnded   MessageType = "chat.session.ended"
-	MessageTypeChatTransferred    MessageType = "chat.transferred"
-	MessageTypeChatTyping         MessageType = "chat.typing"
+	MessageTypeChatSessionStarted  MessageType = "chat.session.started"
+	MessageTypeChatMessage         MessageType = "chat.message"
+	MessageTypeChatMessageNew      MessageType = "chat.message.new"
+	MessageTypeChatSessionEnded    MessageType = "chat.session.ended"
+	MessageTypeChatSessionAssigned MessageType = "chat.session.assigned"
+	MessageTypeChatTransferred     MessageType = "chat.transferred"
+	MessageTypeChatTyping          MessageType = "chat.typing"
+	MessageTypeChatAgentJoined     MessageType = "chat.agent.joined"
 
 	// Notification Events
 	MessageTypeNotification MessageType = "notification"
@@ -147,6 +150,7 @@ type NotificationPayload struct {
 // SubscribePayload represents subscription request data
 type SubscribePayload struct {
 	Events []MessageType `json:"events"`
+	Topics []string      `json:"topics"` // Alternative field name for frontend compatibility
 }
 
 // ErrorPayload represents error data

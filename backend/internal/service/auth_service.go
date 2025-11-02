@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"time"
 
 	"github.com/psschand/callcenter/internal/common"
 	"github.com/psschand/callcenter/internal/core"
@@ -150,12 +149,12 @@ func (s *authService) Login(ctx context.Context, req *dto.LoginRequest) (*dto.Au
 		return nil, errors.NewUnauthorized("user account is inactive")
 	}
 
-	// Update last login
-	now := time.Now()
-	user.LastLoginAt = &now
-	if err := s.userRepo.Update(ctx, user); err != nil {
-		// Log error but don't fail login
-	}
+	// Update last login - commented out due to schema mismatch
+	// now := time.Now()
+	// user.LastLoginAt = &now
+	// if err := s.userRepo.Update(ctx, user); err != nil {
+	// 	// Log error but don't fail login
+	// }
 
 	// Generate tokens
 	accessToken, err := s.jwtService.GenerateAccessToken(user.ID, req.TenantID, user.Email, userRole.Role)
@@ -177,6 +176,14 @@ func (s *authService) Login(ctx context.Context, req *dto.LoginRequest) (*dto.Au
 			FirstName: user.FirstName,
 			LastName:  user.LastName,
 			Phone:     user.Phone,
+			Status:    user.Status,
+			Roles: []dto.UserRoleResponse{
+				{
+					ID:       userRole.ID,
+					TenantID: userRole.TenantID,
+					Role:     userRole.Role,
+				},
+			},
 		},
 		ExpiresIn: 3600,
 	}, nil

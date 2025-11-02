@@ -40,7 +40,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	response.Created(c, result, "User registered successfully")
+	c.JSON(201, gin.H{
+		"success": true,
+		"data":    result,
+		"message": "User registered successfully",
+	})
 }
 
 // Login handles user login
@@ -64,7 +68,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, result, "Login successful")
+	c.JSON(200, gin.H{
+		"success": true,
+		"data":    result,
+		"message": "Login successful",
+	})
 }
 
 // RefreshToken handles token refresh
@@ -72,11 +80,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // @Tags auth
 // @Accept json
 // @Produce json
-// @Param request body dto.RefreshTokenRequest true "Refresh token request"
+// @Param request body map[string]string true "Refresh token request"
 // @Success 200 {object} response.Response
 // @Router /auth/refresh [post]
 func (h *AuthHandler) RefreshToken(c *gin.Context) {
-	var req dto.RefreshTokenRequest
+	var req struct {
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.ValidationError(c, err)
 		return
@@ -88,7 +98,11 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, result, "Token refreshed successfully")
+	c.JSON(200, gin.H{
+		"success": true,
+		"data":    result,
+		"message": "Token refreshed successfully",
+	})
 }
 
 // ChangePassword handles password change
@@ -114,7 +128,10 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, nil, "Password changed successfully")
+	c.JSON(200, gin.H{
+		"success": true,
+		"message": "Password changed successfully",
+	})
 }
 
 // ResetPasswordRequest handles password reset request
@@ -122,11 +139,13 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 // @Tags auth
 // @Accept json
 // @Produce json
-// @Param request body dto.ResetPasswordRequestDTO true "Reset password request"
+// @Param request body map[string]string true "Reset password request"
 // @Success 200 {object} response.Response
 // @Router /auth/reset-password-request [post]
 func (h *AuthHandler) ResetPasswordRequest(c *gin.Context) {
-	var req dto.ResetPasswordRequestDTO
+	var req struct {
+		Email string `json:"email" binding:"required,email"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.ValidationError(c, err)
 		return
@@ -137,7 +156,10 @@ func (h *AuthHandler) ResetPasswordRequest(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, nil, "Password reset email sent")
+	c.JSON(200, gin.H{
+		"success": true,
+		"message": "Password reset email sent",
+	})
 }
 
 // Me returns current user info
@@ -160,7 +182,11 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		"role":      role,
 	}
 
-	response.Success(c, user, "User information retrieved")
+	c.JSON(200, gin.H{
+		"success": true,
+		"data":    user,
+		"message": "User information retrieved",
+	})
 }
 
 // Logout handles user logout
@@ -173,5 +199,8 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	// In a stateless JWT system, logout is typically handled client-side
 	// Here we just acknowledge the logout request
 	// In a production system, you might want to blacklist the token
-	response.Success(c, nil, "Logged out successfully")
+	c.JSON(200, gin.H{
+		"success": true,
+		"message": "Logged out successfully",
+	})
 }

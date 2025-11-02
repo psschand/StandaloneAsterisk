@@ -43,12 +43,16 @@ services:
       - MYSQL_USER=${MYSQL_USER}
       - MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD}
     command: --default-authentication-plugin=mysql_native_password
+    ports:
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./docker/mysql/init:/docker-entrypoint-initdb.d
       - ./docker/mysql/my.cnf:/etc/mysql/conf.d/my.cnf
     networks:
-      - call-center-network
+      call-center-network:
+        aliases:
+          - db
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u${MYSQL_USER}", "-p${MYSQL_PASSWORD}"]
       timeout: 20s
@@ -60,8 +64,62 @@ services:
     image: adminer:latest
     container_name: adminer
     restart: unless-stopped
+    networks:
+      - call-center-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: backend
+    restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8001:8001"
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8001
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - DB_NAME=${MYSQL_DATABASE}
+      - JWT_SECRET=your-secret-key-change-in-production
+      - JWT_EXPIRATION=24h
+      - CORS_ALLOWED_ORIGINS=http://138.2.68.107
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - call-center-network
+    volumes:
+      - ./backend/.env:/app/.env:ro
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    networks:
+      - call-center-network
+
+  caddy:
+    image: caddy:latest
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - call-center-network
+    depends_on:
+      - backend
   
 networks:
   call-center-network:
@@ -78,4 +136,8 @@ volumes:
   asterisk_voicemail:
     driver: local
   asterisk_sounds:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
     driver: local

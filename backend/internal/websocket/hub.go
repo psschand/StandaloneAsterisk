@@ -97,8 +97,11 @@ func (h *Hub) broadcastMessage(bm *BroadcastMessage) {
 
 	clients, ok := h.clients[bm.TenantID]
 	if !ok {
+		log.Printf("[Hub] No clients found for tenant: %s", bm.TenantID)
 		return
 	}
+
+	log.Printf("[Hub] Broadcasting to %d clients in tenant %s, message type: %s", len(clients), bm.TenantID, bm.Message.Type)
 
 	messageBytes, err := json.Marshal(bm.Message)
 	if err != nil {
@@ -106,20 +109,45 @@ func (h *Hub) broadcastMessage(bm *BroadcastMessage) {
 		return
 	}
 
+	sentCount := 0
+	skippedUser := 0
+	skippedSub := 0
+
 	for client := range clients {
 		// Skip if user-specific and doesn't match
 		if bm.UserID > 0 && client.UserID != bm.UserID {
+			skippedUser++
 			continue
 		}
 
 		// Check subscription
 		if !client.IsSubscribed(bm.Message.Type) {
+			log.Printf("[Hub] Client %s (User: %d) NOT subscribed to %s", client.ID, client.UserID, bm.Message.Type)
+			skippedSub++
 			continue
 		}
 
+		// For chat messages, check if visitor should receive it
+		if bm.Message.Type == MessageTypeChatMessage && client.Role == "visitor" {
+			// Parse message payload to get sessionID
+			var payload ChatMessagePayload
+			payloadBytes, _ := json.Marshal(bm.Message.Payload)
+			if err := json.Unmarshal(payloadBytes, &payload); err == nil {
+				// Only send to visitor if it's their session
+				if client.SessionID != payload.SessionID {
+					log.Printf("[Hub] Skipping visitor client %s - different session (client: %d, message: %d)", client.ID, client.SessionID, payload.SessionID)
+					continue
+				}
+			}
+		}
+
 		// Send message
+		log.Printf("[Hub] Sending message to client %s (User: %d, Role: %s, Session: %d)", client.ID, client.UserID, client.Role, client.SessionID)
 		client.SendRaw(messageBytes)
+		sentCount++
 	}
+
+	log.Printf("[Hub] Broadcast complete: sent=%d, skipped_user=%d, skipped_sub=%d", sentCount, skippedUser, skippedSub)
 }
 
 // countClients counts total connected clients

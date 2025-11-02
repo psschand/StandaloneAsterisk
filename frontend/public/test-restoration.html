@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Session Restoration Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-box {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .instructions {
+            background: #e3f2fd;
+            padding: 15px;
+            border-left: 4px solid #2196f3;
+            margin: 20px 0;
+        }
+        .instructions h3 {
+            margin-top: 0;
+            color: #1976d2;
+        }
+        .instructions ol {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        .instructions li {
+            margin: 8px 0;
+        }
+        button {
+            background: #4caf50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 10px 10px 0;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button.danger {
+            background: #f44336;
+        }
+        button.danger:hover {
+            background: #da190b;
+        }
+        button.info {
+            background: #2196f3;
+        }
+        button.info:hover {
+            background: #0b7dda;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .status.success {
+            background: #c8e6c9;
+            color: #1b5e20;
+        }
+        .status.error {
+            background: #ffcdd2;
+            color: #b71c1c;
+        }
+        .status.info {
+            background: #bbdefb;
+            color: #0d47a1;
+        }
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-box">
+        <h1>🔄 Session Restoration Test</h1>
+        <p>Test the chat widget's session persistence feature.</p>
+        
+        <div class="instructions">
+            <h3>📋 Test Steps:</h3>
+            <ol>
+                <li><strong>Click "Open Chat"</strong> below (or click the chat bubble)</li>
+                <li><strong>Send a message</strong> in the chat widget</li>
+                <li><strong>Close the widget</strong> (click X button)</li>
+                <li><strong>Click "Reload Page"</strong> button to simulate page refresh</li>
+                <li><strong>Click "Open Chat"</strong> again</li>
+                <li><strong>✅ Expected:</strong> Your previous message should be restored!</li>
+            </ol>
+        </div>
+
+        <div>
+            <button onclick="openChat()">Open Chat</button>
+            <button onclick="location.reload()" class="info">Reload Page</button>
+            <button onclick="clearStorage()" class="danger">Clear Storage</button>
+            <button onclick="showStorage()" class="info">Show Storage</button>
+        </div>
+
+        <div id="status"></div>
+        <div id="storage-display"></div>
+    </div>
+
+    <div class="test-box">
+        <h3>Console Logs</h3>
+        <p>Open browser DevTools Console (F12) to see detailed logs:</p>
+        <ul>
+            <li>✅ Session saved to localStorage</li>
+            <li>🔄 Attempting to restore session</li>
+            <li>✅ Session restored successfully</li>
+            <li>💓 Heartbeat sent</li>
+            <li>🔌 WebSocket connected</li>
+        </ul>
+    </div>
+
+    <!-- Chat Widget -->
+    <script src="/chat-widget.js"></script>
+    <script>
+        // Initialize chat widget
+        CallCenterChat.init({
+            apiUrl: '',  // Use relative URLs (nginx proxy)
+            tenantId: 'demo-tenant',
+            position: 'bottom-right',
+            primaryColor: '#4F46E5',
+            title: 'Test Chat',
+            subtitle: 'Session Restoration Test'
+        });
+
+        function openChat() {
+            CallCenterChat.open();
+            showStatus('Chat opened', 'success');
+        }
+
+        function clearStorage() {
+            localStorage.removeItem('cc_chat_session');
+            showStatus('localStorage cleared! Refresh and start a new chat.', 'error');
+            showStorage();
+        }
+
+        function showStorage() {
+            const stored = localStorage.getItem('cc_chat_session');
+            const display = document.getElementById('storage-display');
+            
+            if (stored) {
+                try {
+                    const data = JSON.parse(stored);
+                    const age = Math.floor((Date.now() - data.timestamp) / 1000);
+                    
+                    display.innerHTML = `
+                        <div class="status info">
+                            <strong>📦 LocalStorage Data:</strong><br>
+                            Session Key: ${data.sessionKey}<br>
+                            Conversation ID: ${data.conversationId}<br>
+                            Messages: ${data.messages ? data.messages.length : 0}<br>
+                            Age: ${age} seconds<br>
+                            Expires in: ${1800 - age} seconds (${Math.floor((1800 - age) / 60)} minutes)
+                        </div>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                } catch (e) {
+                    display.innerHTML = `<div class="status error">Invalid JSON in storage</div>`;
+                }
+            } else {
+                display.innerHTML = `<div class="status info">No session data in localStorage</div>`;
+            }
+        }
+
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.innerHTML = `<div class="status ${type}">${message}</div>`;
+            setTimeout(() => {
+                status.innerHTML = '';
+            }, 5000);
+        }
+
+        // Auto-check storage on load
+        window.addEventListener('load', () => {
+            showStorage();
+            
+            // Check if we have a session and show appropriate message
+            const stored = localStorage.getItem('cc_chat_session');
+            if (stored) {
+                try {
+                    const data = JSON.parse(stored);
+                    const age = Math.floor((Date.now() - data.timestamp) / 1000);
+                    
+                    if (age < 1800) {
+                        showStatus(`✅ Found existing session (${age}s old). Open chat to restore!`, 'success');
+                    } else {
+                        showStatus(`⏰ Session expired (${age}s old). Will start new session.`, 'info');
+                    }
+                } catch (e) {
+                    // Invalid data
+                }
+            }
+        });
+    </script>
+</body>
+</html>

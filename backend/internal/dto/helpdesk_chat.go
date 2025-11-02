@@ -137,24 +137,29 @@ type TicketStatsResponse struct {
 // ChatWidgetResponse represents chat widget data
 // @Description Chat widget configuration
 type ChatWidgetResponse struct {
-	ID                   int64     `json:"id" example:"1"`
-	TenantID             string    `json:"tenant_id" example:"acme-corp"`
-	WidgetKey            string    `json:"widget_key" example:"wgt_abc123xyz"`
-	Name                 string    `json:"name" example:"Main Website Chat"`
-	IsEnabled            bool      `json:"is_enabled" example:"true"`
-	PrimaryColor         string    `json:"primary_color" example:"#0084FF"`
-	SecondaryColor       string    `json:"secondary_color" example:"#FFFFFF"`
-	WidgetPosition       string    `json:"widget_position" example:"bottom-right"`
-	WelcomeMessage       string    `json:"welcome_message" example:"Hi! How can we help you today?"`
-	ShowAgentTyping      bool      `json:"show_agent_typing" example:"true"`
-	ShowReadReceipts     bool      `json:"show_read_receipts" example:"true"`
-	AllowFileUpload      bool      `json:"allow_file_upload" example:"true"`
-	RequireEmail         bool      `json:"require_email" example:"false"`
-	RequireName          bool      `json:"require_name" example:"true"`
-	BusinessHoursEnabled bool      `json:"business_hours_enabled" example:"true"`
-	EmbedCode            string    `json:"embed_code" example:"<script>...</script>"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	ID                   int64                  `json:"id" example:"1"`
+	TenantID             string                 `json:"tenant_id" example:"acme-corp"`
+	WidgetKey            string                 `json:"widget_key" example:"wgt_abc123xyz"`
+	Name                 string                 `json:"name" example:"Main Website Chat"`
+	IsEnabled            bool                   `json:"is_enabled" example:"true"`
+	PrimaryColor         string                 `json:"primary_color" example:"#0084FF"`
+	SecondaryColor       string                 `json:"secondary_color" example:"#FFFFFF"`
+	WidgetPosition       string                 `json:"widget_position" example:"bottom-right"`
+	Position             string                 `json:"position" example:"bottom-right"` // Alias
+	WelcomeMessage       string                 `json:"welcome_message" example:"Hi! How can we help you today?"`
+	GreetingMessage      string                 `json:"greeting_message" example:"Hi! How can we help you today?"` // Alias
+	PlaceholderText      string                 `json:"placeholder_text" example:"Type your message..."`
+	ShowAgentTyping      bool                   `json:"show_agent_typing" example:"true"`
+	ShowReadReceipts     bool                   `json:"show_read_receipts" example:"true"`
+	AllowFileUpload      bool                   `json:"allow_file_upload" example:"true"`
+	EnableFileUpload     bool                   `json:"enable_file_upload" example:"true"` // Alias
+	RequireEmail         bool                   `json:"require_email" example:"false"`
+	RequireName          bool                   `json:"require_name" example:"true"`
+	BusinessHoursEnabled bool                   `json:"business_hours_enabled" example:"true"`
+	EmbedCode            string                 `json:"embed_code" example:"<script>...</script>"`
+	Settings             map[string]interface{} `json:"settings,omitempty"` // Extended configuration
+	CreatedAt            time.Time              `json:"created_at"`
+	UpdatedAt            time.Time              `json:"updated_at"`
 }
 
 // CreateChatWidgetRequest represents chat widget creation data
@@ -183,15 +188,67 @@ type UpdateChatWidgetRequest struct {
 	PrimaryColor         *string `json:"primary_color,omitempty" example:"#0084FF"`
 	SecondaryColor       *string `json:"secondary_color,omitempty" example:"#FFFFFF"`
 	WidgetPosition       *string `json:"widget_position,omitempty" example:"bottom-right"`
+	Position             *string `json:"position,omitempty" example:"bottom-right"` // Alias for WidgetPosition
 	WelcomeMessage       *string `json:"welcome_message,omitempty" example:"Hi! How can we help you today?"`
+	GreetingMessage      *string `json:"greeting_message,omitempty" example:"Hi! How can we help you today?"` // Frontend uses this
+	PlaceholderText      *string `json:"placeholder_text,omitempty" example:"Type your message..."`
+	TeamName             *string `json:"team_name,omitempty" example:"Support Team"`
+	ShowAgentAvatar      *bool   `json:"show_agent_avatar,omitempty" example:"true"`
+	ShowAgentName        *bool   `json:"show_agent_name,omitempty" example:"true"`
 	ShowAgentTyping      *bool   `json:"show_agent_typing,omitempty" example:"true"`
 	ShowReadReceipts     *bool   `json:"show_read_receipts,omitempty" example:"true"`
 	AllowFileUpload      *bool   `json:"allow_file_upload,omitempty" example:"true"`
+	EnableFileUpload     *bool   `json:"enable_file_upload,omitempty" example:"true"` // Alias
 	RequireEmail         *bool   `json:"require_email,omitempty" example:"false"`
 	RequireName          *bool   `json:"require_name,omitempty" example:"true"`
 	DefaultTeam          *string `json:"default_team,omitempty" example:"Support Team"`
+	CompanyName          *string `json:"company_name,omitempty" example:"Your Company"`
+	OfflineMessage       *string `json:"offline_message,omitempty" example:"We're currently offline"`
 	BusinessHoursEnabled *bool   `json:"business_hours_enabled,omitempty" example:"true"`
 	BusinessHours        *string `json:"business_hours,omitempty"`
+
+	// Pre-chat form
+	EnablePreChatForm *bool   `json:"enable_pre_chat_form,omitempty" example:"false"`
+	PreChatFields     *string `json:"pre_chat_fields,omitempty"` // JSON string
+
+	// Marketing & Sales
+	EnableProactiveChat *bool   `json:"enable_proactive_chat,omitempty" example:"false"`
+	ProactiveDelay      *int    `json:"proactive_delay,omitempty" example:"10"`
+	ProactiveMessage    *string `json:"proactive_message,omitempty"`
+	ShowUnreadCount     *bool   `json:"show_unread_count,omitempty" example:"true"`
+	EnableSound         *bool   `json:"enable_sound,omitempty" example:"true"`
+
+	// UX Features
+	EnableTypingIndicator *bool   `json:"enable_typing_indicator,omitempty" example:"true"`
+	EnableEmoji           *bool   `json:"enable_emoji,omitempty" example:"true"`
+	EnableQuickReplies    *bool   `json:"enable_quick_replies,omitempty" example:"false"`
+	QuickReplies          *string `json:"quick_replies,omitempty"` // JSON array string
+	EnableRating          *bool   `json:"enable_rating,omitempty" example:"true"`
+	ShowChatHistory       *bool   `json:"show_chat_history,omitempty" example:"true"`
+
+	// Sales & Marketing
+	EnableProductShowcase *bool   `json:"enable_product_showcase,omitempty" example:"false"`
+	ShowcaseProducts      *string `json:"showcase_products,omitempty"` // JSON array string
+	EnableLeadCapture     *bool   `json:"enable_lead_capture,omitempty" example:"false"`
+	LeadCaptureTrigger    *string `json:"lead_capture_trigger,omitempty" example:"on_exit"`
+	LeadCaptureDelay      *int    `json:"lead_capture_delay,omitempty" example:"30"`
+
+	// AI Features
+	EnableAISuggestions      *bool `json:"enable_ai_suggestions,omitempty" example:"false"`
+	EnableSmartReplies       *bool `json:"enable_smart_replies,omitempty" example:"false"`
+	EnableSentimentAnalysis  *bool `json:"enable_sentiment_analysis,omitempty" example:"false"`
+	EnableSatisfactionSurvey *bool `json:"enable_satisfaction_survey,omitempty" example:"false"`
+	EnableChatTranscript     *bool `json:"enable_chat_transcript,omitempty" example:"true"`
+
+	// Branding
+	CompanyLogo  *string `json:"company_logo,omitempty"`
+	WelcomeImage *string `json:"welcome_image,omitempty"`
+	Favicon      *string `json:"favicon,omitempty"`
+
+	// Analytics
+	TrackVisitorInfo *bool `json:"track_visitor_info,omitempty" example:"true"`
+	TrackPageViews   *bool `json:"track_page_views,omitempty" example:"true"`
+	TrackReferrer    *bool `json:"track_referrer,omitempty" example:"true"`
 }
 
 // ChatSessionResponse represents chat session data

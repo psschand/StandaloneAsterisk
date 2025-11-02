@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
@@ -55,7 +56,9 @@ func (h *ChatHandler) GetWidget(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, result)
+	// Flatten settings into root level for frontend compatibility
+	flattenedResult := h.flattenWidgetResponse(result)
+	response.Success(c, flattenedResult)
 }
 
 // UpdateWidget updates a chat widget
@@ -78,7 +81,9 @@ func (h *ChatHandler) UpdateWidget(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, result)
+	// Flatten settings into root level for frontend compatibility
+	flattenedResult := h.flattenWidgetResponse(result)
+	response.Success(c, flattenedResult)
 }
 
 // DeleteWidget deletes a chat widget
@@ -182,6 +187,69 @@ func (h *ChatHandler) AssignSession(c *gin.Context) {
 	}
 
 	response.Success(c, nil)
+}
+
+// TransferSession transfers a chat session to another agent
+func (h *ChatHandler) TransferSession(c *gin.Context) {
+	sessionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.ValidationError(c, map[string]string{"id": "invalid session ID"})
+		return
+	}
+
+	var req struct {
+		ToAgentID *int64  `json:"to_agent_id"`
+		ToTeam    *string `json:"to_team"`
+		Notes     string  `json:"notes"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ValidationError(c, err)
+		return
+	}
+
+	// Get current user (from agent)
+	fromAgentID := c.GetInt64("user_id")
+
+	// Validate: either to_agent_id or to_team must be provided
+	if req.ToAgentID == nil && req.ToTeam == nil {
+		response.BadRequest(c, "Either to_agent_id or to_team must be provided")
+		return
+	}
+
+	// Transfer to specific agent
+	if req.ToAgentID != nil {
+		if err := h.chatService.TransferSession(c.Request.Context(), sessionID, fromAgentID, *req.ToAgentID, req.Notes); err != nil {
+			response.Error(c, err)
+			return
+		}
+		response.Success(c, gin.H{
+			"message":     "Session transferred successfully",
+			"to_agent_id": *req.ToAgentID,
+		})
+		return
+	}
+
+	// Transfer to team/queue (unassign the session)
+	if req.ToTeam != nil {
+		// Unassign the session (sets assigned_to_id to NULL)
+		if err := h.chatService.UnassignSession(c.Request.Context(), sessionID); err != nil {
+			response.Error(c, err)
+			return
+		}
+
+		// Send system message
+		transferMsg := fmt.Sprintf("Chat transferred to %s team", *req.ToTeam)
+		msgReq := &dto.SendChatMessageRequest{
+			Body: &transferMsg,
+		}
+		h.chatService.SendMessage(c.Request.Context(), sessionID, nil, "system", "System", msgReq)
+
+		response.Success(c, gin.H{
+			"message": "Session transferred to team",
+			"team":    *req.ToTeam,
+		})
+		return
+	}
 }
 
 // EndSession ends a chat session
@@ -340,32 +408,6 @@ func (h *ChatHandler) GetAvailableAgents(c *gin.Context) {
 	response.Success(c, agents)
 }
 
-// TransferSession transfers a session to another agent
-func (h *ChatHandler) TransferSession(c *gin.Context) {
-	sessionID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.ValidationError(c, map[string]string{"id": "invalid session ID"})
-		return
-	}
-
-	var req struct {
-		FromAgentID int64  `json:"from_agent_id" binding:"required"`
-		ToAgentID   int64  `json:"to_agent_id" binding:"required"`
-		Reason      string `json:"reason"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.ValidationError(c, err)
-		return
-	}
-
-	if err := h.chatService.TransferSession(c.Request.Context(), sessionID, req.FromAgentID, req.ToAgentID, req.Reason); err != nil {
-		response.Error(c, err)
-		return
-	}
-
-	response.Success(c, nil)
-}
-
 // GetStats gets chat statistics
 func (h *ChatHandler) GetStats(c *gin.Context) {
 	tenantID := c.GetString("tenant_id")
@@ -400,4 +442,41 @@ func (h *ChatHandler) GetStats(c *gin.Context) {
 	}
 
 	response.Success(c, stats)
+}
+
+// flattenWidgetResponse flattens settings/metadata into root level for frontend compatibility
+func (h *ChatHandler) flattenWidgetResponse(widget *dto.ChatWidgetResponse) map[string]interface{} {
+	result := map[string]interface{}{
+		"id":                     widget.ID,
+		"tenant_id":              widget.TenantID,
+		"widget_key":             widget.WidgetKey,
+		"name":                   widget.Name,
+		"is_enabled":             widget.IsEnabled,
+		"primary_color":          widget.PrimaryColor,
+		"secondary_color":        widget.SecondaryColor,
+		"widget_position":        widget.WidgetPosition,
+		"position":               widget.Position,
+		"welcome_message":        widget.WelcomeMessage,
+		"greeting_message":       widget.GreetingMessage,
+		"placeholder_text":       widget.PlaceholderText,
+		"show_agent_typing":      widget.ShowAgentTyping,
+		"show_read_receipts":     widget.ShowReadReceipts,
+		"allow_file_upload":      widget.AllowFileUpload,
+		"enable_file_upload":     widget.EnableFileUpload,
+		"require_email":          widget.RequireEmail,
+		"require_name":           widget.RequireName,
+		"business_hours_enabled": widget.BusinessHoursEnabled,
+		"embed_code":             widget.EmbedCode,
+		"created_at":             widget.CreatedAt,
+		"updated_at":             widget.UpdatedAt,
+	}
+
+	// Flatten settings into root level
+	if widget.Settings != nil {
+		for key, value := range widget.Settings {
+			result[key] = value
+		}
+	}
+
+	return result
 }
