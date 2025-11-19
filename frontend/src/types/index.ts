@@ -1,6 +1,6 @@
 // User and Authentication Types
 // User roles
-export type UserRole = 'superadmin' | 'tenant_admin' | 'manager' | 'supervisor' | 'agent' | 'viewer';
+export type UserRole = 'superadmin' | 'tenant_admin' | 'admin' | 'manager' | 'supervisor' | 'agent' | 'viewer';
 
 export interface User {
   id: number;
@@ -17,6 +17,7 @@ export interface User {
     id: number;
     tenant_id: string;
     role: UserRole;
+    endpoint_id?: string; // Extension assigned to user
   }>;
   created_at: string;
   updated_at: string;

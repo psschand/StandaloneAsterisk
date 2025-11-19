@@ -67,6 +67,7 @@ func main() {
 	didRepo := repository.NewDIDRepository(db)
 	queueRepo := repository.NewQueueRepository(db)
 	queueMemberRepo := repository.NewQueueMemberRepository(db)
+	ivrRepo := repository.NewIVRMenuRepository(db)
 	cdrRepo := repository.NewCDRRepository(db)
 	agentStateRepo := repository.NewAgentStateRepository(db)
 	ticketRepo := repository.NewTicketRepository(db)
@@ -78,6 +79,10 @@ func main() {
 	chatAgentRepo := repository.NewChatAgentRepository(db)
 	chatTransferRepo := repository.NewChatTransferRepository(db)
 	webhookRepo := repository.NewWebhookRepository(db)
+	endpointRepo := repository.NewPsEndpointRepository(db)
+	authRepo := repository.NewPsAuthRepository(db)
+	aorRepo := repository.NewPsAorRepository(db)
+	outboundRouteRepo := repository.NewOutboundRouteRepository(db)
 
 	log.Println("Repositories initialized")
 
@@ -152,13 +157,15 @@ func main() {
 	// Initialize services
 	authService := service.NewAuthService(userRepo, tenantRepo, roleRepo, jwtService)
 	tenantService := service.NewTenantService(tenantRepo)
-	userService := service.NewUserService(userRepo, roleRepo, tenantRepo)
-	didService := service.NewDIDService(didRepo, tenantRepo, queueRepo, userRepo)
+	userService := service.NewUserService(userRepo, roleRepo, tenantRepo, endpointRepo)
+	didService := service.NewDIDService(didRepo, tenantRepo, queueRepo, ivrRepo, userRepo)
 	queueService := service.NewQueueService(queueRepo, queueMemberRepo, tenantRepo, userRepo, roleRepo)
+	ivrService := service.NewIVRService(ivrRepo)
 	cdrService := service.NewCDRService(cdrRepo, userRepo)
 	agentStateService := service.NewAgentStateService(agentStateRepo, userRepo)
 	ticketService := service.NewTicketService(ticketRepo, ticketMessageRepo, contactRepo, userRepo)
 	chatService := service.NewChatService(chatWidgetRepo, chatSessionRepo, chatMessageRepo, chatAgentRepo, chatTransferRepo, userRepo)
+	outboundRouteService := service.NewOutboundRouteService(outboundRouteRepo, endpointRepo)
 
 	// Set WebSocket hub for real-time chat updates
 	hubAdapter := ws.NewHubAdapter(hub)
@@ -183,11 +190,19 @@ func main() {
 	userHandler := handler.NewUserHandler(userService)
 	didHandler := handler.NewDIDHandler(didService)
 	queueHandler := handler.NewQueueHandler(queueService)
+	ivrHandler := handler.NewIVRHandler(ivrService)
 	cdrHandler := handler.NewCDRHandler(cdrService)
 	agentStateHandler := handler.NewAgentStateHandler(agentStateService)
 	ticketHandler := handler.NewTicketHandler(ticketService)
-	chatHandler := handler.NewChatHandler(chatService)
+	chatHandler := handler.NewChatHandler(chatService, hub)
 	webhookHandler := handler.NewWebhookHandler(webhookRepo, webhookManager)
+	softphoneHandler := handler.NewSoftphoneHandler(endpointRepo, authRepo, userRepo, roleRepo)
+	endpointIdIpRepo := repository.NewPsEndpointIdIpRepository(db)
+	endpointHandler := handler.NewEndpointHandler(endpointRepo, authRepo, aorRepo, endpointIdIpRepo)
+	trunkHandler := handler.NewTrunkHandler(endpointRepo, authRepo, aorRepo)
+	outboundRouteHandler := handler.NewOutboundRouteHandler(outboundRouteService)
+	securityHandler := handler.NewSecurityHandler()
+	ttsHandler := handler.NewTTSHandler()
 
 	// Create adapter for WebSocket handler to avoid import cycle
 	chatSessionAdapter := &chatSessionAdapter{chatService: chatService}
@@ -195,7 +210,7 @@ func main() {
 
 	// AI Chat handlers
 	knowledgeBaseHandler := handler.NewKnowledgeBaseHandler(knowledgeBaseService)
-	publicChatHandler := handler.NewPublicChatHandler(chatService, aiAgentService)
+	publicChatHandler := handler.NewPublicChatHandler(chatService, aiAgentService, hub)
 	// aiChatService will use aiChatService when we add conversation endpoints
 	_ = aiChatService // Mark as used for now
 
@@ -229,6 +244,9 @@ func main() {
 			"stats":    stats,
 		})
 	})
+
+	// Serve static audio files
+	router.Static("/audio", "/app/data/audio")
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -310,6 +328,16 @@ func main() {
 
 			// Queue routes
 			queues := protected.Group("/queues")
+			protected.POST("/tts/generate", ttsHandler.Generate)
+			// IVR menu routes
+			ivrMenus := protected.Group("/ivr-menus")
+			{
+				ivrMenus.POST("", ivrHandler.Create)
+				ivrMenus.GET("", ivrHandler.List)
+				ivrMenus.GET("/:id", ivrHandler.Get)
+				ivrMenus.PUT("/:id", ivrHandler.Update)
+				ivrMenus.DELETE("/:id", ivrHandler.Delete)
+			}
 			{
 				queues.POST("", queueHandler.Create)
 				queues.GET("", queueHandler.List)
@@ -429,6 +457,55 @@ func main() {
 				webhooks.GET("/:id/logs", webhookHandler.GetWebhookLogs)
 				webhooks.GET("/:id/stats", webhookHandler.GetWebhookStats)
 				webhooks.GET("/failed", webhookHandler.GetFailedWebhooks)
+			}
+
+			// Softphone routes
+			softphone := protected.Group("/softphone")
+			{
+				softphone.GET("/credentials", softphoneHandler.GetCredentials)
+				softphone.GET("/status", softphoneHandler.GetStatus)
+			}
+
+			// Extensions routes (SIP endpoints)
+			extensions := protected.Group("/extensions")
+			{
+				extensions.GET("", endpointHandler.ListExtensions)
+				extensions.GET("/:id", endpointHandler.GetExtension)
+				extensions.POST("", endpointHandler.CreateExtension)
+				extensions.PUT("/:id", endpointHandler.UpdateExtension)
+				extensions.DELETE("/:id", endpointHandler.DeleteExtension)
+				extensions.POST("/:id/reset-password", endpointHandler.ResetPassword)
+				extensions.GET("/:id/status", endpointHandler.GetRegistrationStatus)
+			}
+
+			// SIP Trunks routes
+			trunks := protected.Group("/trunks")
+			{
+				trunks.GET("", trunkHandler.ListTrunks)
+				trunks.GET("/:id", trunkHandler.GetTrunk)
+				trunks.POST("", trunkHandler.CreateTrunk)
+				trunks.DELETE("/:id", trunkHandler.DeleteTrunk)
+			}
+
+			// Outbound Routes
+			outboundRoutes := protected.Group("/outbound-routes")
+			{
+				outboundRoutes.GET("", outboundRouteHandler.ListOutboundRoutes)
+				outboundRoutes.GET("/:id", outboundRouteHandler.GetOutboundRoute)
+				outboundRoutes.POST("", outboundRouteHandler.CreateOutboundRoute)
+				outboundRoutes.PUT("/:id", outboundRouteHandler.UpdateOutboundRoute)
+				outboundRoutes.DELETE("/:id", outboundRouteHandler.DeleteOutboundRoute)
+			}
+
+			// Security routes (admin only)
+			security := protected.Group("/security")
+			security.Use(middleware.RequireRole("superadmin", "admin"))
+			{
+				security.GET("/blocked-ips", securityHandler.GetBlockedIPs)
+				security.POST("/block-ip", securityHandler.BlockIP)
+				security.DELETE("/unblock-ip/:ip", securityHandler.UnblockIP)
+				security.GET("/stats", securityHandler.GetSecurityStats)
+				security.GET("/firewall-logs", securityHandler.GetFirewallLogs)
 			}
 		}
 	}

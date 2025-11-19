@@ -98,7 +98,7 @@ func Auth(jwtService *jwt.Service) gin.HandlerFunc {
 		c.Set("user_id", claims.UserID)
 		c.Set("tenant_id", claims.TenantID)
 		c.Set("email", claims.Email)
-		c.Set("role", claims.Role)
+		c.Set("role", string(claims.Role))
 
 		c.Next()
 	}
@@ -123,7 +123,9 @@ func TenantIsolation() gin.HandlerFunc {
 func RequireRole(roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userRole := c.GetString("role")
+		log.Printf("[RequireRole] User role: '%s', Required roles: %v, Path: %s", userRole, roles, c.Request.URL.Path)
 		if userRole == "" {
+			log.Printf("[RequireRole] Role information not found for path: %s", c.Request.URL.Path)
 			response.Forbidden(c, "Role information not found")
 			c.Abort()
 			return
@@ -139,11 +141,13 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 		}
 
 		if !hasRole {
+			log.Printf("[RequireRole] Insufficient permissions. User role '%s' not in %v for path: %s", userRole, roles, c.Request.URL.Path)
 			response.Forbidden(c, "Insufficient permissions")
 			c.Abort()
 			return
 		}
 
+		log.Printf("[RequireRole] Access granted for user with role '%s' on path: %s", userRole, c.Request.URL.Path)
 		c.Next()
 	}
 }

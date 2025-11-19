@@ -2,12 +2,18 @@ import { useState } from 'react';
 import { X, Send, Loader2, CheckCircle, AlertCircle, Brain } from 'lucide-react';
 import apiClient from '../../lib/api';
 
-interface TestResult {
+interface MatchedEntry {
+  id: number;
+  question: string;
   answer: string;
+  category: string;
+}
+
+interface TestResult {
+  query: string;
+  matched_entries: MatchedEntry[];
+  context: string;
   confidence: number;
-  knowledge_base_ids: number[];
-  intent?: string;
-  sentiment?: number;
 }
 
 interface Props {
@@ -59,11 +65,7 @@ export default function TestQueryModal({ onClose }: Props) {
     return 'Low';
   };
 
-  const getSentimentLabel = (sentiment: number) => {
-    if (sentiment > 0.3) return { label: 'Positive', color: 'text-green-600' };
-    if (sentiment < -0.3) return { label: 'Negative', color: 'text-red-600' };
-    return { label: 'Neutral', color: 'text-gray-600' };
-  };
+
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -140,13 +142,28 @@ export default function TestQueryModal({ onClose }: Props) {
           {/* Result */}
           {result && (
             <div className="space-y-4">
-              {/* AI Response */}
+              {/* Matched Entries */}
               <div className="bg-gradient-to-br from-blue-50 to-green-50 border border-blue-200 rounded-lg p-4">
                 <div className="flex items-start gap-3">
                   <Brain className="w-6 h-6 text-blue-600 flex-shrink-0 mt-1" />
                   <div className="flex-1">
-                    <h4 className="text-sm font-medium text-gray-900 mb-2">AI Agent Response:</h4>
-                    <p className="text-gray-800 whitespace-pre-wrap">{result.answer}</p>
+                    <h4 className="text-sm font-medium text-gray-900 mb-3">Matched Knowledge Base Entries:</h4>
+                    {result.matched_entries.length > 0 ? (
+                      <div className="space-y-3">
+                        {result.matched_entries.map((entry, idx) => (
+                          <div key={entry.id} className="bg-white rounded-lg p-3 border border-blue-100">
+                            <div className="flex items-start justify-between mb-2">
+                              <span className="text-xs font-medium text-blue-600">Entry #{idx + 1}</span>
+                              <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-700 rounded">{entry.category}</span>
+                            </div>
+                            <p className="text-sm font-medium text-gray-900 mb-1">Q: {entry.question}</p>
+                            <p className="text-sm text-gray-700">A: {entry.answer}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-600">No matching entries found in knowledge base.</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -179,45 +196,25 @@ export default function TestQueryModal({ onClose }: Props) {
 
                   {/* Knowledge Base Usage */}
                   <div>
-                    <p className="text-xs text-gray-600 mb-1">Knowledge Base</p>
+                    <p className="text-xs text-gray-600 mb-1">Matched Entries</p>
                     <div className="flex items-center gap-2">
-                      {result.knowledge_base_ids.length > 0 ? (
+                      {result.matched_entries.length > 0 ? (
                         <>
                           <CheckCircle className="w-4 h-4 text-green-600" />
                           <span className="text-sm font-medium text-green-700">
-                            Used ({result.knowledge_base_ids.length} entries)
+                            {result.matched_entries.length} {result.matched_entries.length === 1 ? 'entry' : 'entries'} found
                           </span>
                         </>
                       ) : (
                         <>
                           <AlertCircle className="w-4 h-4 text-yellow-600" />
                           <span className="text-sm font-medium text-yellow-700">
-                            Not used (Gemini only)
+                            No matches found
                           </span>
                         </>
                       )}
                     </div>
                   </div>
-
-                  {/* Intent */}
-                  {result.intent && (
-                    <div>
-                      <p className="text-xs text-gray-600 mb-1">Detected Intent</p>
-                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                        {result.intent}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Sentiment */}
-                  {result.sentiment !== undefined && (
-                    <div>
-                      <p className="text-xs text-gray-600 mb-1">Sentiment</p>
-                      <span className={`text-sm font-medium ${getSentimentLabel(result.sentiment).color}`}>
-                        {getSentimentLabel(result.sentiment).label} ({result.sentiment.toFixed(2)})
-                      </span>
-                    </div>
-                  )}
                 </div>
               </div>
 

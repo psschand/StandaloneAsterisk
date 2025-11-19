@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/psschand/callcenter/internal/asterisk"
@@ -17,7 +18,7 @@ type QueueService interface {
 	GetByTenant(ctx context.Context, tenantID string, page, pageSize int) ([]dto.QueueResponse, int64, error)
 	Update(ctx context.Context, id int64, req *dto.UpdateQueueRequest) (*dto.QueueResponse, error)
 	Delete(ctx context.Context, id int64) error
-	AddMember(ctx context.Context, queueID, userID int64, req *dto.AddQueueMemberRequest) error
+	AddMember(ctx context.Context, queueID int64, req *dto.AddQueueMemberRequest) error
 	RemoveMember(ctx context.Context, queueID, userID int64) error
 	GetMembers(ctx context.Context, queueID int64) ([]dto.QueueMemberResponse, error)
 	UpdateMember(ctx context.Context, memberID int64, req *dto.UpdateQueueMemberRequest) error
@@ -85,11 +86,17 @@ func (s *queueService) Create(ctx context.Context, tenantID string, req *dto.Cre
 		MaxLen:            req.MaxLen,
 		AnnounceFrequency: req.AnnounceFrequency,
 		AnnounceHoldTime:  req.AnnounceHoldTime,
+		AnnouncePosition:  strings.TrimSpace(req.AnnouncePosition),
 		MusicOnHold:       req.MusicOnHold,
-		Status:            "active",
+		Status:            strings.TrimSpace(req.Status),
 		Metadata:          req.Metadata,
 		CreatedAt:         now,
 		UpdatedAt:         now,
+	}
+
+	description := strings.TrimSpace(req.Description)
+	if description != "" {
+		queue.Description = &description
 	}
 
 	// Set defaults if not provided
@@ -104,6 +111,12 @@ func (s *queueService) Create(ctx context.Context, tenantID string, req *dto.Cre
 	}
 	if queue.MaxWaitTime == 0 {
 		queue.MaxWaitTime = 300
+	}
+	if queue.AnnouncePosition == "" {
+		queue.AnnouncePosition = "no"
+	}
+	if queue.Status == "" {
+		queue.Status = "active"
 	}
 
 	if err := s.queueRepo.Create(ctx, queue); err != nil {
@@ -151,7 +164,7 @@ func (s *queueService) Update(ctx context.Context, id int64, req *dto.UpdateQueu
 		queue.DisplayName = *req.DisplayName
 	}
 	if req.Strategy != nil {
-		queue.Strategy = *req.Strategy
+		queue.Strategy = strings.TrimSpace(*req.Strategy)
 	}
 	if req.Timeout != nil {
 		queue.Timeout = *req.Timeout
@@ -171,14 +184,32 @@ func (s *queueService) Update(ctx context.Context, id int64, req *dto.UpdateQueu
 	if req.AnnounceHoldTime != nil {
 		queue.AnnounceHoldTime = *req.AnnounceHoldTime
 	}
+	if req.AnnouncePosition != nil {
+		queue.AnnouncePosition = strings.TrimSpace(*req.AnnouncePosition)
+	}
 	if req.MusicOnHold != nil {
-		queue.MusicOnHold = *req.MusicOnHold
+		queue.MusicOnHold = strings.TrimSpace(*req.MusicOnHold)
 	}
 	if req.Status != nil {
-		queue.Status = *req.Status
+		queue.Status = strings.TrimSpace(*req.Status)
 	}
 	if req.Metadata != nil {
 		queue.Metadata = req.Metadata
+	}
+	if req.Description != nil {
+		trimmed := strings.TrimSpace(*req.Description)
+		if trimmed == "" {
+			queue.Description = nil
+		} else {
+			queue.Description = &trimmed
+		}
+	}
+
+	if queue.AnnouncePosition == "" {
+		queue.AnnouncePosition = "no"
+	}
+	if queue.Status == "" {
+		queue.Status = "active"
 	}
 
 	queue.UpdatedAt = time.Now()
@@ -208,11 +239,16 @@ func (s *queueService) Delete(ctx context.Context, id int64) error {
 }
 
 // AddMember adds a member to a queue
-func (s *queueService) AddMember(ctx context.Context, queueID, userID int64, req *dto.AddQueueMemberRequest) error {
+func (s *queueService) AddMember(ctx context.Context, queueID int64, req *dto.AddQueueMemberRequest) error {
 	// Validate queue exists
 	queue, err := s.queueRepo.FindByID(ctx, queueID)
 	if err != nil {
 		return errors.NewNotFound("queue not found")
+	}
+
+	userID := req.UserID
+	if userID == 0 {
+		return errors.NewValidation("user_id is required")
 	}
 
 	// Validate user exists
@@ -227,15 +263,15 @@ func (s *queueService) AddMember(ctx context.Context, queueID, userID int64, req
 		return errors.NewValidation("user does not belong to the same tenant as queue")
 	}
 
-	// Check if endpoint is configured
-	if userRole.EndpointID == nil || *userRole.EndpointID == "" {
-		return errors.NewValidation("user does not have an endpoint configured")
+	// Check if extension is configured
+	if userRole.Extension == nil || *userRole.Extension == "" {
+		return errors.NewValidation("user does not have an extension configured")
 	}
 
 	// Check if user is already a member
 	existingMembers, _ := s.queueMemberRepo.FindByUser(ctx, userID)
 	for _, member := range existingMembers {
-		if member.QueueName == queue.Name {
+		if member.QueueID == queue.ID {
 			return errors.NewValidation("user is already a member of this queue")
 		}
 	}
@@ -251,13 +287,43 @@ func (s *queueService) AddMember(ctx context.Context, queueID, userID int64, req
 		memberName = user.Email
 	}
 
+	interfaceValue := "PJSIP/" + *userRole.Extension
+	if req.Interface != nil && strings.TrimSpace(*req.Interface) != "" {
+		interfaceValue = strings.TrimSpace(*req.Interface)
+	}
+
+	penalty := req.Penalty
+	if penalty < 0 {
+		penalty = 0
+	}
+
+	paused := req.Paused
+	if paused != 0 && paused != 1 {
+		paused = 0
+	}
+
+	wrapupTime := req.WrapupTime
+	if wrapupTime < 0 {
+		wrapupTime = 0
+	}
+
+	var stateInterface *string
+	if req.StateInterface != nil {
+		trimmed := strings.TrimSpace(*req.StateInterface)
+		if trimmed != "" {
+			stateInterface = &trimmed
+		}
+	}
+
 	member := &asterisk.QueueMember{
-		TenantID:   queue.TenantID,
-		QueueName:  queue.Name,
-		Interface:  "PJSIP/" + *userRole.EndpointID,
-		MemberName: &memberName,
-		Penalty:    req.Penalty,
-		Paused:     0, // 0 = not paused, 1 = paused
+		QueueID:        queue.ID,
+		UserID:         userID,
+		Interface:      interfaceValue,
+		MemberName:     &memberName,
+		StateInterface: stateInterface,
+		Penalty:        penalty,
+		Paused:         paused,
+		WrapupTime:     wrapupTime,
 	}
 
 	if err := s.queueMemberRepo.Create(ctx, member); err != nil {
@@ -295,10 +361,16 @@ func (s *queueService) GetMembers(ctx context.Context, queueID int64) ([]dto.Que
 
 	responses := make([]dto.QueueMemberResponse, len(members))
 	for i, member := range members {
+		queueName := ""
+		if member.Queue != nil {
+			queueName = member.Queue.Name
+		}
+
 		responses[i] = dto.QueueMemberResponse{
-			UniqueID:       member.UniqueID,
-			TenantID:       member.TenantID,
-			QueueName:      member.QueueName,
+			ID:             member.ID,
+			QueueID:        member.QueueID,
+			QueueName:      queueName,
+			UserID:         member.UserID,
 			Interface:      member.Interface,
 			MemberName:     member.MemberName,
 			StateInterface: member.StateInterface,
@@ -339,11 +411,17 @@ func (s *queueService) UpdateMember(ctx context.Context, memberID int64, req *dt
 
 // toQueueResponse converts Queue model to response DTO
 func (s *queueService) toQueueResponse(queue *asterisk.Queue) *dto.QueueResponse {
+	memberCount := 0
+	if len(queue.Members) > 0 {
+		memberCount = len(queue.Members)
+	}
+
 	return &dto.QueueResponse{
 		ID:                queue.ID,
 		TenantID:          queue.TenantID,
 		Name:              queue.Name,
 		DisplayName:       queue.DisplayName,
+		Description:       queue.Description,
 		Strategy:          queue.Strategy,
 		Timeout:           queue.Timeout,
 		Retry:             queue.Retry,
@@ -351,8 +429,10 @@ func (s *queueService) toQueueResponse(queue *asterisk.Queue) *dto.QueueResponse
 		MaxLen:            queue.MaxLen,
 		AnnounceFrequency: queue.AnnounceFrequency,
 		AnnounceHoldTime:  queue.AnnounceHoldTime,
+		AnnouncePosition:  queue.AnnouncePosition,
 		MusicOnHold:       queue.MusicOnHold,
 		Status:            queue.Status,
+		MemberCount:       memberCount,
 		Metadata:          queue.Metadata,
 		CreatedAt:         queue.CreatedAt,
 		UpdatedAt:         queue.UpdatedAt,

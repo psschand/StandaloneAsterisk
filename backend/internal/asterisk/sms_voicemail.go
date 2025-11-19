@@ -102,29 +102,31 @@ func (v *Voicemail) GetFileSizeMB() float64 {
 // This is an ARA (Asterisk Realtime Architecture) table
 // @Description PJSIP endpoint configuration (ARA)
 type PsEndpoint struct {
-	ID              string    `gorm:"column:id;primaryKey;type:varchar(128)" json:"id" example:"acme-agent1"`
-	TenantID        string    `gorm:"column:tenant_id;type:varchar(64);not null;index:idx_tenant_endpoint" json:"tenant_id" example:"acme-corp"`
-	DisplayName     *string   `gorm:"column:display_name;type:varchar(255)" json:"display_name,omitempty" example:"John Doe (Agent 1)"`
-	Transport       *string   `gorm:"column:transport;type:varchar(128)" json:"transport,omitempty" example:"transport-wss"`
-	Aors            *string   `gorm:"column:aors;type:varchar(256)" json:"aors,omitempty" example:"acme-agent1"`
-	Auth            *string   `gorm:"column:auth;type:varchar(128)" json:"auth,omitempty" example:"acme-agent1-auth"`
-	Context         *string   `gorm:"column:context;type:varchar(128)" json:"context,omitempty" example:"agents"`
-	Disallow        *string   `gorm:"column:disallow;type:varchar(256)" json:"disallow,omitempty" example:"all"`
-	Allow           *string   `gorm:"column:allow;type:varchar(256)" json:"allow,omitempty" example:"opus,ulaw,alaw"`
-	DirectMedia     *string   `gorm:"column:direct_media;type:varchar(10)" json:"direct_media,omitempty" example:"no"`
-	DtmfMode        *string   `gorm:"column:dtmf_mode;type:varchar(20)" json:"dtmf_mode,omitempty" example:"rfc4733"`
-	ForceRport      *string   `gorm:"column:force_rport;type:varchar(10)" json:"force_rport,omitempty" example:"yes"`
-	IceSupport      *string   `gorm:"column:ice_support;type:varchar(10)" json:"ice_support,omitempty" example:"yes"`
-	RtpSymmetric    *string   `gorm:"column:rtp_symmetric;type:varchar(10)" json:"rtp_symmetric,omitempty" example:"yes"`
-	RewriteContact  *string   `gorm:"column:rewrite_contact;type:varchar(10)" json:"rewrite_contact,omitempty" example:"yes"`
-	Callerid        *string   `gorm:"column:callerid;type:varchar(128)" json:"callerid,omitempty" example:"Agent 1 <101>"`
-	MediaEncryption *string   `gorm:"column:media_encryption;type:varchar(20)" json:"media_encryption,omitempty" example:"dtls"`
-	Webrtc          *string   `gorm:"column:webrtc;type:varchar(10)" json:"webrtc,omitempty" example:"yes"`
-	CreatedAt       time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt       time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID string `gorm:"column:id;primaryKey;type:varchar(128)" json:"id" example:"acme-agent1"`
+	// TenantID removed - Asterisk tables don't support multi-tenancy
+	// Note: Use Callerid for display name, not display_name (column doesn't exist)
+	Transport       *string `gorm:"column:transport;type:varchar(128)" json:"transport,omitempty" example:"transport-wss"`
+	Aors            *string `gorm:"column:aors;type:varchar(256)" json:"aors,omitempty" example:"acme-agent1"`
+	Auth            *string `gorm:"column:auth;type:varchar(128)" json:"auth,omitempty" example:"acme-agent1-auth"`
+	Context         *string `gorm:"column:context;type:varchar(128)" json:"context,omitempty" example:"agents"`
+	Disallow        *string `gorm:"column:disallow;type:varchar(256)" json:"disallow,omitempty" example:"all"`
+	Allow           *string `gorm:"column:allow;type:varchar(256)" json:"allow,omitempty" example:"opus,ulaw,alaw"`
+	DirectMedia     *string `gorm:"column:direct_media;type:varchar(10)" json:"direct_media,omitempty" example:"no"`
+	DtmfMode        *string `gorm:"column:dtmf_mode;type:varchar(20)" json:"dtmf_mode,omitempty" example:"rfc4733"`
+	ForceRport      *string `gorm:"column:force_rport;type:varchar(10)" json:"force_rport,omitempty" example:"yes"`
+	IceSupport      *string `gorm:"column:ice_support;type:varchar(10)" json:"ice_support,omitempty" example:"yes"`
+	RtpSymmetric    *string `gorm:"column:rtp_symmetric;type:varchar(10)" json:"rtp_symmetric,omitempty" example:"yes"`
+	RewriteContact  *string `gorm:"column:rewrite_contact;type:varchar(10)" json:"rewrite_contact,omitempty" example:"yes"`
+	Callerid        *string `gorm:"column:callerid;type:varchar(128)" json:"callerid,omitempty" example:"Agent 1 <101>"`
+	MediaEncryption *string `gorm:"column:media_encryption;type:varchar(20)" json:"media_encryption,omitempty" example:"dtls"`
+	Webrtc          *string `gorm:"column:webrtc;type:varchar(10)" json:"webrtc,omitempty" example:"yes"`
+	DtlsVerify      *string `gorm:"column:dtls_verify;type:varchar(10)" json:"dtls_verify,omitempty" example:"no"`
+	DtlsSetup       *string `gorm:"column:dtls_setup;type:varchar(10)" json:"dtls_setup,omitempty" example:"actpass"`
+	UseAvpf         *string `gorm:"column:use_avpf;type:varchar(10)" json:"use_avpf,omitempty" example:"yes"`
+	IdentifyBy      *string `gorm:"column:identify_by;type:varchar(128)" json:"identify_by,omitempty" example:"username"`
+	// Asterisk tables don't have timestamp fields - removed CreatedAt and UpdatedAt
 
-	// Relations
-	Tenant *core.Tenant `gorm:"foreignKey:TenantID" json:"tenant,omitempty"`
+	// Relations removed - no tenant support in Asterisk tables
 }
 
 // TableName specifies the table name
@@ -136,18 +138,15 @@ func (PsEndpoint) TableName() string {
 // This is an ARA table
 // @Description PJSIP authentication configuration (ARA)
 type PsAuth struct {
-	ID            string    `gorm:"column:id;primaryKey;type:varchar(128)" json:"id" example:"acme-agent1-auth"`
-	TenantID      string    `gorm:"column:tenant_id;type:varchar(64);not null;index:idx_tenant_auth" json:"tenant_id" example:"acme-corp"`
-	AuthType      *string   `gorm:"column:auth_type;type:varchar(20)" json:"auth_type,omitempty" example:"userpass"`
-	Username      *string   `gorm:"column:username;type:varchar(128)" json:"username,omitempty" example:"acme-agent1"`
-	Password      *string   `gorm:"column:password;type:varchar(256)" json:"-"`
-	Realm         *string   `gorm:"column:realm;type:varchar(128)" json:"realm,omitempty" example:"asterisk"`
-	NonceLifetime *int      `gorm:"column:nonce_lifetime" json:"nonce_lifetime,omitempty" example:"32"`
-	Md5Cred       *string   `gorm:"column:md5_cred;type:varchar(256)" json:"md5_cred,omitempty"`
-	CreatedAt     time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-
-	// Relations
-	Tenant *core.Tenant `gorm:"foreignKey:TenantID" json:"tenant,omitempty"`
+	ID string `gorm:"column:id;primaryKey;type:varchar(128)" json:"id" example:"acme-agent1-auth"`
+	// TenantID removed - Asterisk tables don't support multi-tenancy
+	AuthType      *string `gorm:"column:auth_type;type:varchar(20)" json:"auth_type,omitempty" example:"userpass"`
+	Username      *string `gorm:"column:username;type:varchar(128)" json:"username,omitempty" example:"acme-agent1"`
+	Password      *string `gorm:"column:password;type:varchar(256)" json:"-"`
+	Realm         *string `gorm:"column:realm;type:varchar(128)" json:"realm,omitempty" example:"asterisk"`
+	NonceLifetime *int    `gorm:"column:nonce_lifetime" json:"nonce_lifetime,omitempty" example:"32"`
+	Md5Cred       *string `gorm:"column:md5_cred;type:varchar(256)" json:"md5_cred,omitempty"`
+	// Asterisk tables don't have timestamp fields - removed CreatedAt
 }
 
 // TableName specifies the table name
@@ -159,23 +158,20 @@ func (PsAuth) TableName() string {
 // This is an ARA table
 // @Description PJSIP Address of Record configuration (ARA)
 type PsAor struct {
-	ID                  string    `gorm:"column:id;primaryKey;type:varchar(128)" json:"id" example:"acme-agent1"`
-	TenantID            string    `gorm:"column:tenant_id;type:varchar(64);not null;index:idx_tenant_aor" json:"tenant_id" example:"acme-corp"`
-	Contact             *string   `gorm:"column:contact;type:varchar(256)" json:"contact,omitempty"`
-	DefaultExpiration   *int      `gorm:"column:default_expiration" json:"default_expiration,omitempty" example:"3600"`
-	MaxContacts         *int      `gorm:"column:max_contacts" json:"max_contacts,omitempty" example:"2"`
-	MinimumExpiration   *int      `gorm:"column:minimum_expiration" json:"minimum_expiration,omitempty" example:"60"`
-	MaximumExpiration   *int      `gorm:"column:maximum_expiration" json:"maximum_expiration,omitempty" example:"7200"`
-	QualifyFrequency    *int      `gorm:"column:qualify_frequency" json:"qualify_frequency,omitempty" example:"60"`
-	AuthenticateQualify *string   `gorm:"column:authenticate_qualify;type:varchar(10)" json:"authenticate_qualify,omitempty" example:"no"`
-	RemoveExisting      *string   `gorm:"column:remove_existing;type:varchar(10)" json:"remove_existing,omitempty" example:"yes"`
-	Mailboxes           *string   `gorm:"column:mailboxes;type:varchar(256)" json:"mailboxes,omitempty"`
-	OutboundProxy       *string   `gorm:"column:outbound_proxy;type:varchar(256)" json:"outbound_proxy,omitempty"`
-	SupportPath         *string   `gorm:"column:support_path;type:varchar(10)" json:"support_path,omitempty" example:"yes"`
-	CreatedAt           time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-
-	// Relations
-	Tenant *core.Tenant `gorm:"foreignKey:TenantID" json:"tenant,omitempty"`
+	ID string `gorm:"column:id;primaryKey;type:varchar(128)" json:"id" example:"acme-agent1"`
+	// TenantID removed - Asterisk tables don't support multi-tenancy
+	Contact             *string `gorm:"column:contact;type:varchar(256)" json:"contact,omitempty"`
+	DefaultExpiration   *int    `gorm:"column:default_expiration" json:"default_expiration,omitempty" example:"3600"`
+	MaxContacts         *int    `gorm:"column:max_contacts" json:"max_contacts,omitempty" example:"2"`
+	MinimumExpiration   *int    `gorm:"column:minimum_expiration" json:"minimum_expiration,omitempty" example:"60"`
+	MaximumExpiration   *int    `gorm:"column:maximum_expiration" json:"maximum_expiration,omitempty" example:"7200"`
+	QualifyFrequency    *int    `gorm:"column:qualify_frequency" json:"qualify_frequency,omitempty" example:"60"`
+	AuthenticateQualify *string `gorm:"column:authenticate_qualify;type:varchar(10)" json:"authenticate_qualify,omitempty" example:"no"`
+	RemoveExisting      *string `gorm:"column:remove_existing;type:varchar(10)" json:"remove_existing,omitempty" example:"yes"`
+	Mailboxes           *string `gorm:"column:mailboxes;type:varchar(256)" json:"mailboxes,omitempty"`
+	OutboundProxy       *string `gorm:"column:outbound_proxy;type:varchar(256)" json:"outbound_proxy,omitempty"`
+	SupportPath         *string `gorm:"column:support_path;type:varchar(10)" json:"support_path,omitempty" example:"yes"`
+	// Asterisk tables don't have timestamp fields - removed CreatedAt
 }
 
 // TableName specifies the table name
@@ -213,4 +209,20 @@ func (pc *PsContact) IsExpired() bool {
 		return true
 	}
 	return time.Now().Unix() > *pc.ExpirationTime
+}
+
+// PsEndpointIdIp represents an Asterisk PJSIP endpoint identifier by IP (ps_endpoint_id_ips table)
+// This is an ARA table for IP-based endpoint identification
+// @Description PJSIP endpoint IP-based identification (ARA)
+type PsEndpointIdIp struct {
+	ID          string  `gorm:"column:id;primaryKey;type:varchar(128)" json:"id" example:"1000-identify"`
+	Endpoint    *string `gorm:"column:endpoint;type:varchar(128);index" json:"endpoint,omitempty" example:"1000"`
+	Match       *string `gorm:"column:match;type:varchar(255)" json:"match,omitempty" example:"0.0.0.0/0"`
+	SrvLookups  *string `gorm:"column:srv_lookups;type:varchar(10)" json:"srv_lookups,omitempty" example:"yes"`
+	MatchHeader *string `gorm:"column:match_header;type:varchar(255)" json:"match_header,omitempty"`
+}
+
+// TableName specifies the table name
+func (PsEndpointIdIp) TableName() string {
+	return "ps_endpoint_id_ips"
 }

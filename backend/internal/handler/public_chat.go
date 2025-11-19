@@ -2,11 +2,14 @@ package handler
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/psschand/callcenter/internal/chat"
+	"github.com/psschand/callcenter/internal/common"
 	"github.com/psschand/callcenter/internal/dto"
 	"github.com/psschand/callcenter/internal/service"
+	"github.com/psschand/callcenter/internal/websocket"
 	"github.com/psschand/callcenter/pkg/response"
 )
 
@@ -14,13 +17,15 @@ import (
 type PublicChatHandler struct {
 	chatService service.ChatService
 	aiService   *chat.AIAgentService
+	wsHub       *websocket.Hub
 }
 
 // NewPublicChatHandler creates a new public chat handler
-func NewPublicChatHandler(chatService service.ChatService, aiService *chat.AIAgentService) *PublicChatHandler {
+func NewPublicChatHandler(chatService service.ChatService, aiService *chat.AIAgentService, wsHub *websocket.Hub) *PublicChatHandler {
 	return &PublicChatHandler{
 		chatService: chatService,
 		aiService:   aiService,
+		wsHub:       wsHub,
 	}
 }
 
@@ -73,9 +78,14 @@ func (h *PublicChatHandler) StartSession(c *gin.Context) {
 func (h *PublicChatHandler) SendMessage(c *gin.Context) {
 	var req PublicSendMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		// Log validation error details
+		fmt.Printf("[SendMessage] Validation failed: %v\n", err)
+		fmt.Printf("[SendMessage] Request body: %+v\n", req)
 		response.ValidationError(c, err)
 		return
 	}
+
+	fmt.Printf("[SendMessage] Request received - SessionKey: %s, Message: %s\n", req.SessionKey, req.Message)
 
 	// Get session by key
 	session, err := h.chatService.GetSessionByKey(c.Request.Context(), req.SessionKey)
@@ -114,6 +124,33 @@ func (h *PublicChatHandler) SendMessage(c *gin.Context) {
 		return
 	}
 
+	// Broadcast customer message via WebSocket
+	h.wsHub.BroadcastChatMessageNew(session.TenantID, &websocket.ChatMessagePayload{
+		SessionID:  session.ID,
+		MessageID:  customerMsg.ID,
+		SenderType: "visitor",
+		SenderName: visitorName,
+		Body:       req.Message,
+		Timestamp:  time.Now().Format(time.RFC3339),
+	})
+
+	// ============================================
+	// CHECK SESSION STATUS - Block AI if queued/assigned
+	// ============================================
+
+	// If session is queued (waiting for agent), don't let AI respond
+	if session.Status == common.ChatSessionStatusQueued {
+		response.Success(c, gin.H{
+			"message_id":  customerMsg.ID,
+			"content":     "Your message has been received. An agent will be with you shortly.",
+			"is_agent":    false,
+			"sender_name": "System",
+			"timestamp":   customerMsg.CreatedAt,
+			"status":      "queued",
+		})
+		return
+	}
+
 	// Check if agent is assigned - route to agent
 	if session.AssignedToID != nil {
 		// Agent handles this message - just notify them via WebSocket
@@ -140,13 +177,44 @@ func (h *PublicChatHandler) SendMessage(c *gin.Context) {
 		// Log the error for debugging
 		c.Error(err) // This will be logged by Gin
 
-		// If AI fails, return a fallback message
+		// If AI fails, save and broadcast a fallback message
+		fallbackContent := "I'm sorry, I'm having trouble understanding. Could you rephrase that?"
+		fallbackMsgReq := &dto.SendChatMessageRequest{
+			Body: &fallbackContent,
+		}
+
+		fallbackMsg, msgErr := h.chatService.SendMessage(
+			c.Request.Context(),
+			session.ID,
+			nil,
+			"bot",
+			"AI Assistant",
+			fallbackMsgReq,
+		)
+
+		if msgErr != nil {
+			// If even saving the fallback fails, just return
+			response.Error(c, msgErr)
+			return
+		}
+
+		// Broadcast fallback message via WebSocket
+		h.wsHub.BroadcastChatMessageNew(session.TenantID, &websocket.ChatMessagePayload{
+			SessionID:  session.ID,
+			MessageID:  fallbackMsg.ID,
+			SenderType: "bot",
+			SenderName: "AI Assistant",
+			Body:       fallbackContent,
+			Timestamp:  time.Now().Format(time.RFC3339),
+		})
+
+		// Return fallback message response
 		response.Success(c, gin.H{
-			"message_id":  customerMsg.ID,
-			"content":     "I'm sorry, I'm having trouble understanding. Could you rephrase that?",
+			"message_id":  fallbackMsg.ID,
+			"content":     fallbackContent,
 			"is_agent":    false,
 			"sender_name": "AI Assistant",
-			"timestamp":   customerMsg.CreatedAt,
+			"timestamp":   fallbackMsg.CreatedAt,
 			"error_debug": err.Error(), // Include error in response for testing
 		})
 		return
@@ -177,8 +245,42 @@ func (h *PublicChatHandler) SendMessage(c *gin.Context) {
 			msgReq,
 		)
 
-		// TODO: Update session status to "pending_handover" and notify agents
-		// For now, return response indicating handover is needed
+		// ============================================
+		// TRIGGER HANDOVER: Update status & notify agents
+		// ============================================
+
+		// 1. Update session status to "queued" for agent pickup
+		if err := h.chatService.UpdateSessionStatus(c.Request.Context(), session.ID, common.ChatSessionStatusQueued); err != nil {
+			fmt.Printf("Failed to update session status: %v\n", err)
+		}
+
+		// 2. Broadcast handover message to customer
+		h.wsHub.BroadcastChatMessageNew(session.TenantID, &websocket.ChatMessagePayload{
+			SessionID:  session.ID,
+			MessageID:  handoverMessage.ID,
+			SenderType: "system",
+			SenderName: "AI Assistant",
+			Body:       handoverMsg,
+			Timestamp:  time.Now().Format(time.RFC3339),
+		})
+
+		// 3. Notify ALL available agents about new session needing help (queued session)
+		visitorName := ""
+		if session.VisitorName != nil {
+			visitorName = *session.VisitorName
+		}
+		visitorEmail := ""
+		if session.VisitorEmail != nil {
+			visitorEmail = *session.VisitorEmail
+		}
+
+		sessionPayload := &websocket.ChatSessionPayload{
+			SessionID:    session.ID,
+			VisitorName:  visitorName,
+			VisitorEmail: visitorEmail,
+			Status:       string(common.ChatSessionStatusQueued),
+		}
+		h.wsHub.BroadcastChatSessionEvent(session.TenantID, websocket.MessageTypeChatSessionStarted, sessionPayload)
 
 		response.Success(c, gin.H{
 			"message_id":     handoverMessage.ID,
@@ -215,6 +317,16 @@ func (h *PublicChatHandler) SendMessage(c *gin.Context) {
 		response.Error(c, err)
 		return
 	}
+
+	// Broadcast AI message via WebSocket
+	h.wsHub.BroadcastChatMessageNew(session.TenantID, &websocket.ChatMessagePayload{
+		SessionID:  session.ID,
+		MessageID:  aiMsg.ID,
+		SenderType: "bot",
+		SenderName: "AI Assistant",
+		Body:       aiResponse.Content,
+		Timestamp:  time.Now().Format(time.RFC3339),
+	})
 
 	response.Success(c, gin.H{
 		"message_id":  aiMsg.ID,

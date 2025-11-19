@@ -138,8 +138,18 @@ func (s *authService) Login(ctx context.Context, req *dto.LoginRequest) (*dto.Au
 		return nil, errors.NewUnauthorized("invalid credentials")
 	}
 
+	// If no tenant specified, get user's first tenant
+	tenantID := req.TenantID
+	if tenantID == "" {
+		roles, err := s.roleRepo.FindByUser(ctx, user.ID)
+		if err != nil || len(roles) == 0 {
+			return nil, errors.NewUnauthorized("user has no tenant access")
+		}
+		tenantID = roles[0].TenantID
+	}
+
 	// Check if user has access to this tenant
-	userRole, err := s.roleRepo.FindByUserAndTenant(ctx, user.ID, req.TenantID)
+	userRole, err := s.roleRepo.FindByUserAndTenant(ctx, user.ID, tenantID)
 	if err != nil {
 		return nil, errors.NewUnauthorized("invalid credentials")
 	}
@@ -157,12 +167,12 @@ func (s *authService) Login(ctx context.Context, req *dto.LoginRequest) (*dto.Au
 	// }
 
 	// Generate tokens
-	accessToken, err := s.jwtService.GenerateAccessToken(user.ID, req.TenantID, user.Email, userRole.Role)
+	accessToken, err := s.jwtService.GenerateAccessToken(user.ID, tenantID, user.Email, userRole.Role)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate access token")
 	}
 
-	refreshToken, err := s.jwtService.GenerateRefreshToken(user.ID, req.TenantID)
+	refreshToken, err := s.jwtService.GenerateRefreshToken(user.ID, tenantID)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to generate refresh token")
 	}

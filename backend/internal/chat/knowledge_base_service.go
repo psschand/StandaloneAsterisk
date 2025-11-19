@@ -79,6 +79,8 @@ func (s *KnowledgeBaseService) CreateEntry(ctx context.Context, req *CreateKBReq
 		Question:    req.Question,
 		Answer:      req.Answer,
 		Keywords:    req.Keywords,
+		Tags:        "[]", // Default empty JSON array for tags
+		Embedding:   "[]", // Default empty JSON array for embedding
 		Language:    req.Language,
 		SourceURL:   req.SourceURL,
 		IsActive:    req.IsActive,
@@ -215,13 +217,100 @@ func (s *KnowledgeBaseService) DeleteEntry(ctx context.Context, id int64) error 
 func (s *KnowledgeBaseService) SearchEntries(ctx context.Context, tenantID, query string, limit int) ([]KnowledgeBase, error) {
 	var entries []KnowledgeBase
 
+	// Search in knowledge_base table
 	err := s.db.Where("tenant_id = ? AND is_active = true", tenantID).
 		Where("MATCH(question, answer, keywords) AGAINST(? IN NATURAL LANGUAGE MODE)", query).
 		Order("priority DESC, usage_count DESC").
 		Limit(limit).
 		Find(&entries).Error
 
-	return entries, err
+	if err != nil {
+		return entries, err
+	}
+
+	// Also search in knowledge_base_articles table for uploaded files
+	type ArticleResult struct {
+		ID            int64  `gorm:"column:id"`
+		Title         string `gorm:"column:title"`
+		ExtractedText string `gorm:"column:extracted_text"`
+		Category      string `gorm:"column:category"`
+	}
+
+	var articles []ArticleResult
+	articlesErr := s.db.Table("knowledge_base_articles").
+		Select("id, title, extracted_text, category").
+		Where("tenant_id = ? AND is_active = true", tenantID).
+		Where("extracted_text LIKE ?", "%"+query+"%").
+		Limit(limit).
+		Find(&articles).Error
+
+	// Convert articles to KnowledgeBase format and append
+	if articlesErr == nil && len(articles) > 0 {
+		for _, article := range articles {
+			// Extract a larger snippet for Test Query (1000 chars for better AI context)
+			snippet := extractSnippet(article.ExtractedText, query, 1000)
+
+			kbEntry := KnowledgeBase{
+				ID:       article.ID + 10000, // Offset to avoid ID conflicts
+				TenantID: tenantID,
+				Category: article.Category,
+				Title:    article.Title,
+				Question: "File: " + article.Title,
+				Answer:   snippet,
+				IsActive: true,
+			}
+			entries = append(entries, kbEntry)
+		}
+	}
+
+	// Limit total results
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+
+	return entries, nil
+}
+
+// extractSnippet extracts a text snippet around the search query
+func extractSnippet(text, query string, maxLength int) string {
+	lowerText := strings.ToLower(text)
+	lowerQuery := strings.ToLower(query)
+
+	pos := strings.Index(lowerText, lowerQuery)
+	if pos == -1 {
+		// Query not found, return beginning
+		if len(text) > maxLength {
+			return text[:maxLength] + "..."
+		}
+		return text
+	}
+
+	// Calculate start and end positions
+	start := pos - maxLength/2
+	if start < 0 {
+		start = 0
+	}
+
+	end := start + maxLength
+	if end > len(text) {
+		end = len(text)
+		start = end - maxLength
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	snippet := text[start:end]
+
+	// Add ellipsis if needed
+	if start > 0 {
+		snippet = "..." + snippet
+	}
+	if end < len(text) {
+		snippet = snippet + "..."
+	}
+
+	return snippet
 }
 
 // GetCategories gets all unique categories
@@ -269,10 +358,23 @@ func (s *KnowledgeBaseService) TestQuery(ctx context.Context, tenantID, query st
 		Confidence:     s.calculateMatchConfidence(entries, query),
 	}
 
-	// If AI agent available, get AI response
-	if s.aiAgent != nil {
-		// Note: In real implementation, create a test conversation
-		// For now, just show matched entries
+	// If AI agent available, get AI response using the knowledge base context
+	if s.aiAgent != nil && len(entries) > 0 {
+		// Get Gemini API key from environment or config
+		apiKey := "AIzaSyBFPBYE06uA2-_Pm4EMQ6p0estO6LNaZ-o" // This should come from config
+
+		// Build system prompt with knowledge base context
+		systemPrompt := fmt.Sprintf(`You are a helpful AI assistant. Answer the customer's question based on the following knowledge base information.
+
+%s
+
+Provide a clear, concise, and helpful answer based on the information above. If the knowledge base doesn't contain enough information, say so politely.`, contextBuilder.String())
+
+		// Call Gemini to generate response
+		aiResponse, err := s.aiAgent.callGemini(ctx, apiKey, "gemini-2.0-flash", systemPrompt, []Message{}, query, 300, 0.7)
+		if err == nil && aiResponse != "" {
+			result.AIResponse = aiResponse
+		}
 	}
 
 	return result, nil
@@ -438,4 +540,44 @@ func (s *KnowledgeBaseService) ProcessDocument(ctx context.Context, file interfa
 
 	// Process the document
 	return docService.ProcessDocument(ctx, fileHeader, req)
+}
+
+// UploadedFileInfo represents information about an uploaded file
+type UploadedFileInfo struct {
+	ID               int64     `json:"id"`
+	Title            string    `json:"title"`
+	FileName         string    `json:"file_name"`
+	FileOriginalName string    `json:"file_original_name"`
+	FileSize         int64     `json:"file_size"`
+	FileType         string    `json:"file_type"`
+	Category         string    `json:"category"`
+	Language         string    `json:"language"`
+	WebsiteID        *int64    `json:"website_id"`
+	IsActive         bool      `json:"is_active"`
+	CreatedAt        time.Time `json:"created_at"`
+	TextLength       int       `json:"text_length"`
+}
+
+// ListUploadedFiles lists uploaded files filtered by website
+func (s *KnowledgeBaseService) ListUploadedFiles(ctx context.Context, tenantID string, websiteID *int64) ([]UploadedFileInfo, error) {
+	var files []UploadedFileInfo
+
+	query := s.db.WithContext(ctx).
+		Table("knowledge_base_articles").
+		Select("id, title, file_name, file_original_name, file_size, file_type, category, language, website_id, is_active, created_at, LENGTH(extracted_text) as text_length").
+		Where("tenant_id = ?", tenantID)
+
+	// Filter by website: include tenant-wide (NULL) + website-specific files
+	if websiteID != nil {
+		query = query.Where("(website_id IS NULL OR website_id = ?)", *websiteID)
+	} else {
+		// If no website specified, only return tenant-wide files
+		query = query.Where("website_id IS NULL")
+	}
+
+	if err := query.Order("created_at DESC").Find(&files).Error; err != nil {
+		return nil, fmt.Errorf("failed to list uploaded files: %w", err)
+	}
+
+	return files, nil
 }

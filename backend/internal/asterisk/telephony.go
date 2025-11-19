@@ -45,13 +45,15 @@ type Queue struct {
 	TenantID          string         `gorm:"column:tenant_id;type:varchar(64);not null;index:idx_tenant_queue" json:"tenant_id" example:"acme-corp"`
 	Name              string         `gorm:"column:name;type:varchar(128);not null;index:idx_tenant_queue" json:"name" example:"sales"`
 	DisplayName       string         `gorm:"column:display_name;type:varchar(255);not null" json:"display_name" example:"Sales Queue"`
+	Description       *string        `gorm:"column:description;type:text" json:"description,omitempty"`
 	Strategy          string         `gorm:"column:strategy;type:enum('ringall','leastrecent','fewestcalls','random','rrmemory','rrordered','linear','wrandom');default:ringall" json:"strategy" example:"leastrecent"`
 	Timeout           int            `gorm:"column:timeout;default:30" json:"timeout" example:"30"`
 	Retry             int            `gorm:"column:retry;default:5" json:"retry" example:"5"`
 	MaxWaitTime       int            `gorm:"column:max_wait_time;default:300" json:"max_wait_time" example:"300"`
 	MaxLen            int            `gorm:"column:max_len;default:0" json:"max_len" example:"0"`
 	AnnounceFrequency int            `gorm:"column:announce_frequency;default:60" json:"announce_frequency" example:"60"`
-	AnnounceHoldTime  bool           `gorm:"column:announce_hold_time;default:true" json:"announce_hold_time" example:"true"`
+	AnnounceHoldTime  bool           `gorm:"column:announce_hold_time;default:false" json:"announce_hold_time" example:"false"`
+	AnnouncePosition  string         `gorm:"column:announce_position;type:varchar(10);default:no" json:"announce_position" example:"no"`
 	MusicOnHold       string         `gorm:"column:music_on_hold;type:varchar(128);default:default" json:"music_on_hold" example:"default"`
 	Status            string         `gorm:"column:status;type:enum('active','inactive');default:active;index" json:"status" example:"active"`
 	Metadata          common.JSONMap `gorm:"column:metadata;type:json" json:"metadata,omitempty"`
@@ -60,7 +62,7 @@ type Queue struct {
 
 	// Relations
 	Tenant  *core.Tenant  `gorm:"foreignKey:TenantID" json:"tenant,omitempty"`
-	Members []QueueMember `gorm:"foreignKey:QueueName;references:Name" json:"members,omitempty"`
+	Members []QueueMember `gorm:"foreignKey:QueueID;references:ID" json:"members,omitempty"`
 }
 
 // TableName specifies the table name
@@ -76,18 +78,21 @@ func (q *Queue) IsActive() bool {
 // QueueMember represents a member (agent) in a queue
 // @Description Queue member assignment with penalty and state
 type QueueMember struct {
-	UniqueID       int64   `gorm:"column:uniqueid;primaryKey;autoIncrement" json:"uniqueid" example:"1"`
-	TenantID       string  `gorm:"column:tenant_id;type:varchar(64);not null;index:idx_tenant_queue" json:"tenant_id" example:"acme-corp"`
-	QueueName      string  `gorm:"column:queue_name;type:varchar(128);not null;index:idx_tenant_queue" json:"queue_name" example:"sales"`
-	Interface      string  `gorm:"column:interface;type:varchar(128);not null" json:"interface" example:"PJSIP/acme-agent1"`
-	MemberName     *string `gorm:"column:membername;type:varchar(128)" json:"membername,omitempty" example:"John Doe"`
-	StateInterface *string `gorm:"column:state_interface;type:varchar(128)" json:"state_interface,omitempty" example:"PJSIP/acme-agent1"`
-	Penalty        int     `gorm:"column:penalty;default:0" json:"penalty" example:"0"`
-	Paused         int     `gorm:"column:paused;default:0" json:"paused" example:"0"`
-	WrapupTime     int     `gorm:"column:wrapuptime;default:0" json:"wrapuptime" example:"0"`
+	ID             int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id" example:"1"`
+	QueueID        int64     `gorm:"column:queue_id;not null;index:idx_queue_id" json:"queue_id" example:"1"`
+	UserID         int64     `gorm:"column:user_id;not null;index:idx_user_id" json:"user_id" example:"42"`
+	Interface      string    `gorm:"column:interface;type:varchar(128);not null" json:"interface" example:"PJSIP/acme-agent1"`
+	MemberName     *string   `gorm:"column:membername;type:varchar(128)" json:"membername,omitempty" example:"John Doe"`
+	StateInterface *string   `gorm:"column:state_interface;type:varchar(128)" json:"state_interface,omitempty" example:"PJSIP/acme-agent1"`
+	Penalty        int       `gorm:"column:penalty;default:0" json:"penalty" example:"0"`
+	Paused         int       `gorm:"column:paused;default:0" json:"paused" example:"0"`
+	WrapupTime     int       `gorm:"column:wrapup_time;default:0" json:"wrapup_time" example:"0"`
+	CreatedAt      time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 
 	// Relations
-	Queue *Queue `gorm:"foreignKey:QueueName;references:Name" json:"queue,omitempty"`
+	Queue *Queue     `gorm:"foreignKey:QueueID" json:"queue,omitempty"`
+	User  *core.User `gorm:"foreignKey:UserID" json:"user,omitempty"`
 }
 
 // TableName specifies the table name
@@ -99,6 +104,46 @@ func (QueueMember) TableName() string {
 func (qm *QueueMember) IsPaused() bool {
 	return qm.Paused == 1
 }
+
+// IVRMenu represents an IVR menu definition
+type IVRMenu struct {
+	ID                  int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	TenantID            string    `gorm:"column:tenant_id;type:varchar(64);not null;index" json:"tenant_id"`
+	Name                string    `gorm:"column:name;type:varchar(255);not null" json:"name"`
+	DisplayName         *string   `gorm:"column:display_name;type:varchar(255)" json:"display_name,omitempty"`
+	Description         *string   `gorm:"column:description;type:text" json:"description,omitempty"`
+	GreetingAudioURL    *string   `gorm:"column:greeting_audio_url;type:varchar(500)" json:"greeting_audio_url,omitempty"`
+	GreetingText        *string   `gorm:"column:greeting_text;type:text" json:"greeting_text,omitempty"`
+	Timeout             int       `gorm:"column:timeout;default:5" json:"timeout"`
+	MaxAttempts         int       `gorm:"column:max_attempts;default:3" json:"max_attempts"`
+	Status              string    `gorm:"column:status;type:varchar(50);default:'active'" json:"status"`
+	InvalidOptionAction string    `gorm:"column:invalid_option_action;type:varchar(50);default:'repeat'" json:"invalid_option_action"`
+	TimeoutAction       string    `gorm:"column:timeout_action;type:varchar(50);default:'repeat'" json:"timeout_action"`
+	IsActive            bool      `gorm:"column:is_active;default:true" json:"is_active"`
+	CreatedAt           time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt           time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+
+	Options []IVROption `gorm:"foreignKey:IVRMenuID" json:"options,omitempty"`
+}
+
+// TableName for IVRMenu
+func (IVRMenu) TableName() string { return "ivr_menus" }
+
+// IVROption represents an IVR menu option
+type IVROption struct {
+	ID          int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id"`
+	IVRMenuID   int64     `gorm:"column:ivr_menu_id;not null;index" json:"ivr_menu_id"`
+	Digit       string    `gorm:"column:digit;type:varchar(10);not null" json:"digit"`
+	Action      string    `gorm:"column:action;type:varchar(50);not null" json:"action"`
+	ActionData  *string   `gorm:"column:action_data;type:varchar(500)" json:"action_data,omitempty"`
+	Description *string   `gorm:"column:description;type:varchar(255)" json:"description,omitempty"`
+	SortOrder   int       `gorm:"column:sort_order;default:0" json:"sort_order"`
+	CreatedAt   time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+}
+
+// TableName for IVROption
+func (IVROption) TableName() string { return "ivr_options" }
 
 // CDR represents Call Detail Record
 // @Description Call detail record for billing and analytics

@@ -1,5 +1,5 @@
 // Service Worker for PWA offline support
-const CACHE_NAME = 'callcenter-v1';
+const CACHE_NAME = 'callcenter-v2'; // Increment version to force cache refresh
 const API_CACHE_NAME = 'callcenter-api-v1';
 
 // Resources to cache immediately
@@ -83,25 +83,15 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets - cache first, network as fallback
-  event.respondWith(
-    caches.match(request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Return cached version and update cache in background
-        fetch(request).then((response) => {
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(request, response);
-          });
-        }).catch(() => {
-          // Ignore fetch errors when updating cache
-        });
-        return cachedResponse;
-      }
-
-      // Not in cache, fetch from network
-      return fetch(request)
+  // Static assets - NETWORK FIRST for JS/CSS (always get latest), cache others
+  const isJsOrCss = url.pathname.endsWith('.js') || url.pathname.endsWith('.css');
+  
+  if (isJsOrCss) {
+    // JS/CSS: Network first (always get fresh bundle during development)
+    event.respondWith(
+      fetch(request)
         .then((response) => {
-          // Cache successful responses
+          // Cache the new version
           if (response.status === 200) {
             const responseToCache = response.clone();
             caches.open(CACHE_NAME).then((cache) => {
@@ -111,13 +101,47 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => {
-          // If offline and navigating, show offline page
-          if (request.mode === 'navigate') {
-            return caches.match('/offline.html');
-          }
-        });
-    })
-  );
+          // If network fails, fall back to cache
+          return caches.match(request);
+        })
+    );
+  } else {
+    // Other static assets - cache first, network as fallback
+    event.respondWith(
+      caches.match(request).then((cachedResponse) => {
+        if (cachedResponse) {
+          // Return cached version and update cache in background
+          fetch(request).then((response) => {
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(request, response);
+            });
+          }).catch(() => {
+            // Ignore fetch errors when updating cache
+          });
+          return cachedResponse;
+        }
+
+        // Not in cache, fetch from network
+        return fetch(request)
+          .then((response) => {
+            // Cache successful responses
+            if (response.status === 200) {
+              const responseToCache = response.clone();
+              caches.open(CACHE_NAME).then((cache) => {
+                cache.put(request, responseToCache);
+              });
+            }
+            return response;
+          })
+          .catch(() => {
+            // If offline and navigating, show offline page
+            if (request.mode === 'navigate') {
+              return caches.match('/offline.html');
+            }
+          });
+      })
+    );
+  }
 });
 
 // Background sync for failed requests

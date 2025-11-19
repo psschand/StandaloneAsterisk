@@ -12,6 +12,7 @@ import (
 type ChatWidget struct {
 	ID        int64  `gorm:"column:id;primaryKey;autoIncrement" json:"id" example:"1"`
 	TenantID  string `gorm:"column:tenant_id;type:varchar(64);not null;uniqueIndex:idx_tenant_widget" json:"tenant_id" example:"acme-corp"`
+	WebsiteID *int64 `gorm:"column:website_id;index" json:"website_id,omitempty" example:"1"`
 	WidgetKey string `gorm:"column:widget_key;type:varchar(64);not null;uniqueIndex" json:"widget_key" example:"wgt_abc123xyz"`
 	Name      string `gorm:"column:name;type:varchar(255);not null" json:"name" example:"Main Website Chat"`
 	IsEnabled bool   `gorm:"column:is_enabled;default:true;index" json:"is_enabled" example:"true"`

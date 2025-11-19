@@ -1,0 +1,19 @@
+User-agent: *
+Allow: /
+Allow: /about
+Allow: /contact
+Allow: /privacy-policy
+Allow: /terms-of-service
+Allow: /login
+
+# Disallow authenticated areas
+Disallow: /admin/
+Disallow: /agents
+Disallow: /calls
+Disallow: /queues
+Disallow: /settings
+Disallow: /chat
+Disallow: /softphone
+
+# Sitemap
+Sitemap: https://app.soham.top/sitemap.xml

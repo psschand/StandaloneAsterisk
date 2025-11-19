@@ -45,8 +45,9 @@ func (r *psEndpointRepository) FindByID(ctx context.Context, id string) (*asteri
 // FindByTenant finds all PJSIP endpoints for a tenant
 func (r *psEndpointRepository) FindByTenant(ctx context.Context, tenantID string) ([]asterisk.PsEndpoint, error) {
 	var endpoints []asterisk.PsEndpoint
+	// TODO: Add tenant_id column to ps_endpoints table
+	// For now, return all endpoints since the table doesn't have tenant_id yet
 	err := r.db.WithContext(ctx).
-		Where("tenant_id = ?", tenantID).
 		Find(&endpoints).Error
 	return endpoints, err
 }

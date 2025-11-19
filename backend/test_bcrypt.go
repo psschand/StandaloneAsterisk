@@ -8,7 +8,7 @@ import (
 
 func main() {
 	// The hash from the database
-	hash := "$2a$10$rjVLXZ4WOFhxRmf4xYfB1OeZ9pW4WvHGzQ4VDcZfGWnJX5T8ZKzVm"
+	hash := "$2a$10$MjIueE.4Gir0ClC2xbkZ.eucCbkgChImalUF0asK3gTz.FQ7./qbG"
 
 	// Test passwords
 	passwords := []string{

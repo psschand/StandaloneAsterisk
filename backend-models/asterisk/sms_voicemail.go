@@ -120,6 +120,10 @@ type PsEndpoint struct {
 	Callerid          *string    `gorm:"column:callerid;type:varchar(128)" json:"callerid,omitempty" example:"Agent 1 <101>"`
 	MediaEncryption   *string    `gorm:"column:media_encryption;type:varchar(20)" json:"media_encryption,omitempty" example:"dtls"`
 	Webrtc            *string    `gorm:"column:webrtc;type:varchar(10)" json:"webrtc,omitempty" example:"yes"`
+	DtlsVerify        *string    `gorm:"column:dtls_verify;type:varchar(10)" json:"dtls_verify,omitempty" example:"no"`
+	DtlsSetup         *string    `gorm:"column:dtls_setup;type:varchar(10)" json:"dtls_setup,omitempty" example:"actpass"`
+	UseAvpf           *string    `gorm:"column:use_avpf;type:varchar(10)" json:"use_avpf,omitempty" example:"yes"`
+	IdentifyBy        *string    `gorm:"column:identify_by;type:varchar(128)" json:"identify_by,omitempty" example:"username"`
 	CreatedAt         time.Time  `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt         time.Time  `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 	

@@ -12,10 +12,12 @@ type UserRole string
 
 const (
 	RoleSuperAdmin  UserRole = "superadmin"
+	RoleAdmin       UserRole = "admin"
 	RoleTenantAdmin UserRole = "tenant_admin"
 	RoleSupervisor  UserRole = "supervisor"
 	RoleAgent       UserRole = "agent"
 	RoleViewer      UserRole = "viewer"
+	RoleManager     UserRole = "manager"
 )
 
 // UserStatus represents the status of a user account

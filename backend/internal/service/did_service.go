@@ -27,6 +27,7 @@ type didService struct {
 	didRepo    repository.DIDRepository
 	tenantRepo repository.TenantRepository
 	queueRepo  repository.QueueRepository
+	ivrRepo    repository.IVRMenuRepository
 	userRepo   repository.UserRepository
 }
 
@@ -35,12 +36,14 @@ func NewDIDService(
 	didRepo repository.DIDRepository,
 	tenantRepo repository.TenantRepository,
 	queueRepo repository.QueueRepository,
+	ivrRepo repository.IVRMenuRepository,
 	userRepo repository.UserRepository,
 ) DIDService {
 	return &didService{
 		didRepo:    didRepo,
 		tenantRepo: tenantRepo,
 		queueRepo:  queueRepo,
+		ivrRepo:    ivrRepo,
 		userRepo:   userRepo,
 	}
 }
@@ -233,7 +236,7 @@ func (s *didService) GetAvailable(ctx context.Context) ([]dto.DIDResponse, error
 // validateRouting validates routing configuration
 func (s *didService) validateRouting(ctx context.Context, tenantID, routeType, routeDestination string) error {
 	switch routeType {
-	case "queue":
+	case string(common.RouteTypeQueue):
 		// Validate queue exists
 		if routeDestination == "" {
 			return errors.NewValidation("queue name is required for queue routing")
@@ -242,19 +245,22 @@ func (s *didService) validateRouting(ctx context.Context, tenantID, routeType, r
 		if err != nil || queue == nil {
 			return errors.NewValidation("queue not found")
 		}
-	case "extension":
+	case string(common.RouteTypeEndpoint):
 		// Validate extension exists
 		if routeDestination == "" {
 			return errors.NewValidation("extension is required for extension routing")
 		}
 		// TODO: Validate extension exists in tenant
-	case "ivr":
+	case string(common.RouteTypeIVR):
 		// Validate IVR exists
 		if routeDestination == "" {
 			return errors.NewValidation("IVR name is required for IVR routing")
 		}
-		// TODO: Validate IVR exists
-	case "voicemail":
+		ivrMenu, err := s.ivrRepo.FindByName(ctx, tenantID, routeDestination)
+		if err != nil || ivrMenu == nil {
+			return errors.NewValidation("IVR menu not found")
+		}
+	case string(common.RouteTypeVoicemail):
 		// Validate voicemail box exists
 		if routeDestination == "" {
 			return errors.NewValidation("voicemail box is required for voicemail routing")

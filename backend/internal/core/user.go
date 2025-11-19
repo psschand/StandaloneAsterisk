@@ -15,6 +15,7 @@ type User struct {
 	FirstName     *string           `gorm:"column:first_name;type:varchar(100)" json:"first_name,omitempty" example:"John"`
 	LastName      *string           `gorm:"column:last_name;type:varchar(100)" json:"last_name,omitempty" example:"Doe"`
 	Phone         *string           `gorm:"column:phone;type:varchar(32)" json:"phone,omitempty" example:"+1234567890"`
+	Extension     *string           `gorm:"column:extension;type:varchar(20)" json:"extension,omitempty" example:"agent100"`
 	Status        common.UserStatus `gorm:"column:status;type:enum('active','inactive','suspended');default:active;index" json:"status" example:"active"`
 	EmailVerified bool              `gorm:"column:email_verified;default:false" json:"email_verified" example:"true"`
 	LastLoginAt   *time.Time        `gorm:"column:last_login_at" json:"last_login_at,omitempty"`
@@ -60,7 +61,8 @@ type UserRole struct {
 	UserID      int64              `gorm:"column:user_id;not null;index:idx_user_tenant" json:"user_id" example:"1"`
 	TenantID    string             `gorm:"column:tenant_id;type:varchar(64);not null;index:idx_user_tenant;index:idx_tenant" json:"tenant_id" example:"acme-corp"`
 	Role        common.UserRole    `gorm:"column:role;type:enum('superadmin','tenant_admin','supervisor','agent','viewer');not null;index" json:"role" example:"agent"`
-	EndpointID  *string            `gorm:"column:endpoint_id;type:varchar(128);index" json:"endpoint_id,omitempty" example:"acme-agent1"`
+	Extension   *string            `gorm:"column:extension;type:varchar(20);index" json:"extension,omitempty" example:"agent100"`
+	IsActive    bool               `gorm:"column:is_active;default:true;index" json:"is_active" example:"true"`
 	Permissions common.Permissions `gorm:"column:permissions;type:json" json:"permissions"`
 	CreatedAt   time.Time          `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt   time.Time          `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`

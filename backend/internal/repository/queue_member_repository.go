@@ -53,6 +53,7 @@ func (r *queueMemberRepository) FindByQueue(ctx context.Context, queueID int64) 
 	var members []asterisk.QueueMember
 	err := r.db.WithContext(ctx).
 		Preload("User").
+		Preload("Queue").
 		Where("queue_id = ?", queueID).
 		Order("penalty ASC, member_name ASC").
 		Find(&members).Error

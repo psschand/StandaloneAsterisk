@@ -7,9 +7,10 @@ user_agent=Asterisk-Twilio-Docker
 [transport-udp]
 type=transport
 protocol=udp
-bind=0.0.0.0
+bind=0.0.0.0:5060
 external_signaling_address=${ASTERISK_PUBLIC_IP}
 external_media_address=${ASTERISK_PUBLIC_IP}
+local_net=172.0.0.0/8
 allow_reload=yes
 
 ; ==================== Twilio SIP trunk ====================

@@ -2,7 +2,7 @@
 // Uses environment variables for deployment flexibility
 
 export const config = {
-  apiBaseUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080',
+  apiBaseUrl: import.meta.env.VITE_API_BASE_URL || '',  // Use empty string for relative URLs
   wsBaseUrl: import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8080',
   ariWsUrl: import.meta.env.VITE_ARI_WS_URL || 'ws://localhost:8088/ari/events',
   

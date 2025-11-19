@@ -231,6 +231,17 @@ func (h *Hub) BroadcastChatMessage(tenantID string, payload *ChatMessagePayload)
 	return nil
 }
 
+// BroadcastChatMessageNew broadcasts a new chat message event
+func (h *Hub) BroadcastChatMessageNew(tenantID string, payload *ChatMessagePayload) error {
+	msg, err := NewMessage(MessageTypeChatMessageNew, payload)
+	if err != nil {
+		return err
+	}
+	msg.TenantID = tenantID
+	h.BroadcastToTenant(tenantID, msg)
+	return nil
+}
+
 // BroadcastChatSessionEvent broadcasts a chat session event
 func (h *Hub) BroadcastChatSessionEvent(tenantID string, msgType MessageType, payload *ChatSessionPayload) error {
 	msg, err := NewMessage(msgType, payload)

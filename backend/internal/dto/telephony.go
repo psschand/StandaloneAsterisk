@@ -71,6 +71,7 @@ type QueueResponse struct {
 	TenantID          string         `json:"tenant_id" example:"acme-corp"`
 	Name              string         `json:"name" example:"sales"`
 	DisplayName       string         `json:"display_name" example:"Sales Queue"`
+	Description       *string        `json:"description,omitempty" example:"Primary sales queue"`
 	Strategy          string         `json:"strategy" example:"leastrecent"`
 	Timeout           int            `json:"timeout" example:"30"`
 	Retry             int            `json:"retry" example:"5"`
@@ -78,6 +79,7 @@ type QueueResponse struct {
 	MaxLen            int            `json:"max_len" example:"0"`
 	AnnounceFrequency int            `json:"announce_frequency" example:"60"`
 	AnnounceHoldTime  bool           `json:"announce_hold_time" example:"true"`
+	AnnouncePosition  string         `json:"announce_position" example:"no"`
 	MusicOnHold       string         `json:"music_on_hold" example:"default"`
 	Status            string         `json:"status" example:"active"`
 	MemberCount       int            `json:"member_count" example:"5"`
@@ -91,6 +93,7 @@ type QueueResponse struct {
 type CreateQueueRequest struct {
 	Name              string         `json:"name" binding:"required" example:"sales"`
 	DisplayName       string         `json:"display_name" binding:"required" example:"Sales Queue"`
+	Description       string         `json:"description" example:"Primary queue for sales team"`
 	Strategy          string         `json:"strategy" example:"leastrecent"`
 	Timeout           int            `json:"timeout" example:"30"`
 	Retry             int            `json:"retry" example:"5"`
@@ -98,7 +101,9 @@ type CreateQueueRequest struct {
 	MaxLen            int            `json:"max_len" example:"0"`
 	AnnounceFrequency int            `json:"announce_frequency" example:"60"`
 	AnnounceHoldTime  bool           `json:"announce_hold_time" example:"true"`
+	AnnouncePosition  string         `json:"announce_position" example:"no"`
 	MusicOnHold       string         `json:"music_on_hold" example:"default"`
+	Status            string         `json:"status" example:"active"`
 	Metadata          common.JSONMap `json:"metadata,omitempty"`
 }
 
@@ -106,6 +111,7 @@ type CreateQueueRequest struct {
 // @Description Update call queue configuration
 type UpdateQueueRequest struct {
 	DisplayName       *string        `json:"display_name,omitempty" example:"Sales Queue"`
+	Description       *string        `json:"description,omitempty" example:"Primary queue"`
 	Strategy          *string        `json:"strategy,omitempty" example:"leastrecent"`
 	Timeout           *int           `json:"timeout,omitempty" example:"30"`
 	Retry             *int           `json:"retry,omitempty" example:"5"`
@@ -113,17 +119,84 @@ type UpdateQueueRequest struct {
 	MaxLen            *int           `json:"max_len,omitempty" example:"0"`
 	AnnounceFrequency *int           `json:"announce_frequency,omitempty" example:"60"`
 	AnnounceHoldTime  *bool          `json:"announce_hold_time,omitempty" example:"true"`
+	AnnouncePosition  *string        `json:"announce_position,omitempty" example:"no"`
 	MusicOnHold       *string        `json:"music_on_hold,omitempty" example:"default"`
 	Status            *string        `json:"status,omitempty" example:"active"`
 	Metadata          common.JSONMap `json:"metadata,omitempty"`
 }
 
+// ===================================
+// IVR MENU MANAGEMENT
+// ===================================
+
+// IVROptionPayload represents an IVR option
+// @Description IVR menu option definition
+type IVROptionPayload struct {
+	ID           *int64 `json:"id,omitempty" example:"1"`
+	Digit        string `json:"digit" binding:"required" example:"1"`
+	ActionType   string `json:"action_type" binding:"required" example:"queue"`
+	ActionTarget string `json:"action_target" binding:"required" example:"sales"`
+	Description  string `json:"description" example:"Route to sales queue"`
+}
+
+// IVRMenuResponse represents IVR menu data
+// @Description IVR menu configuration with options
+type IVRMenuResponse struct {
+	ID                  int64              `json:"id" example:"1"`
+	TenantID            string             `json:"tenant_id" example:"acme-corp"`
+	Name                string             `json:"name" example:"main-menu"`
+	DisplayName         *string            `json:"display_name,omitempty" example:"Main Menu"`
+	Description         *string            `json:"description,omitempty"`
+	GreetingText        *string            `json:"greeting_text,omitempty"`
+	GreetingAudioURL    *string            `json:"greeting_audio_url,omitempty"`
+	Timeout             int                `json:"timeout" example:"10"`
+	MaxAttempts         int                `json:"max_attempts" example:"3"`
+	Status              string             `json:"status" example:"active"`
+	InvalidOptionAction string             `json:"invalid_option_action" example:"repeat"`
+	TimeoutAction       string             `json:"timeout_action" example:"repeat"`
+	Options             []IVROptionPayload `json:"options"`
+	CreatedAt           time.Time          `json:"created_at"`
+	UpdatedAt           time.Time          `json:"updated_at"`
+}
+
+// CreateIVRMenuRequest represents IVR menu creation
+// @Description Create a new IVR menu
+type CreateIVRMenuRequest struct {
+	Name                string             `json:"name" binding:"required" example:"main-menu"`
+	DisplayName         *string            `json:"display_name,omitempty" example:"Main Menu"`
+	Description         *string            `json:"description,omitempty"`
+	GreetingText        *string            `json:"greeting_text,omitempty"`
+	GreetingAudioURL    *string            `json:"greeting_audio_url,omitempty"`
+	Timeout             int                `json:"timeout" example:"10"`
+	MaxAttempts         int                `json:"max_attempts" example:"3"`
+	Status              string             `json:"status" example:"active"`
+	InvalidOptionAction string             `json:"invalid_option_action" example:"repeat"`
+	TimeoutAction       string             `json:"timeout_action" example:"repeat"`
+	Options             []IVROptionPayload `json:"options"`
+}
+
+// UpdateIVRMenuRequest represents IVR menu update data
+// @Description Update IVR menu configuration
+type UpdateIVRMenuRequest struct {
+	DisplayName         *string            `json:"display_name,omitempty"`
+	Description         *string            `json:"description,omitempty"`
+	GreetingText        *string            `json:"greeting_text,omitempty"`
+	GreetingAudioURL    *string            `json:"greeting_audio_url,omitempty"`
+	Timeout             *int               `json:"timeout,omitempty"`
+	MaxAttempts         *int               `json:"max_attempts,omitempty"`
+	Status              *string            `json:"status,omitempty"`
+	InvalidOptionAction *string            `json:"invalid_option_action,omitempty"`
+	TimeoutAction       *string            `json:"timeout_action,omitempty"`
+	Options             []IVROptionPayload `json:"options"`
+}
+
 // QueueMemberResponse represents queue member data
 // @Description Queue member information
 type QueueMemberResponse struct {
-	UniqueID       int64   `json:"uniqueid" example:"1"`
-	TenantID       string  `json:"tenant_id" example:"acme-corp"`
+	ID             int64   `json:"id" example:"1"`
+	QueueID        int64   `json:"queue_id" example:"1"`
 	QueueName      string  `json:"queue_name" example:"sales"`
+	UserID         int64   `json:"user_id" example:"42"`
 	Interface      string  `json:"interface" example:"PJSIP/acme-agent1"`
 	MemberName     *string `json:"membername,omitempty" example:"John Doe"`
 	StateInterface *string `json:"state_interface,omitempty" example:"PJSIP/acme-agent1"`
@@ -135,7 +208,8 @@ type QueueMemberResponse struct {
 // AddQueueMemberRequest represents adding member to queue
 // @Description Add agent to queue
 type AddQueueMemberRequest struct {
-	Interface      string  `json:"interface" binding:"required" example:"PJSIP/acme-agent1"`
+	UserID         int64   `json:"user_id" binding:"required" example:"42"`
+	Interface      *string `json:"interface,omitempty" example:"PJSIP/acme-agent1"`
 	MemberName     *string `json:"membername,omitempty" example:"John Doe"`
 	StateInterface *string `json:"state_interface,omitempty" example:"PJSIP/acme-agent1"`
 	Penalty        int     `json:"penalty" example:"0"`

@@ -1,44 +1,100 @@
-{
-    # Global options
-    auto_https off
+# HTTPS server for frontend on port 443
+app.soham.top {
+	# Security headers
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+	}
+
+	# Backend API - proxy to containerized backend
+	handle /api/* {
+		reverse_proxy backend:8001 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	# Audio files - proxy to backend for TTS and recordings
+	handle /audio/* {
+		reverse_proxy backend:8001 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	# WebSocket Secure (WSS) proxy for Asterisk WebRTC
+	# Handle WebSocket connections to /ws endpoint
+	handle /ws {
+		reverse_proxy asterisk:8088 {
+			# Disable buffering for WebSocket streaming
+			flush_interval -1
+			# Pass WebSocket upgrade headers
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	# Frontend - serve static files (must be last, catches all remaining routes)
+	reverse_proxy frontend:80 {
+		header_up X-Forwarded-Proto https
+	}
+
+	# Logs
+	log {
+		output stdout
+		format json
+	}
 }
 
-# Main server on port 8443 - Backend API only
-# CORS is handled by the backend Go application
-:8443 {
-    # Backend API - proxy to containerized backend
-    handle /api/* {
-        reverse_proxy backend:8001
-    }
+# Backend API server on port 8443 (separate)
+app.soham.top:8443 {
 
-    # WebSocket for backend
-    handle /ws* {
-        reverse_proxy backend:8001
-    }
+	# Backend API - proxy to containerized backend
+	handle /api/* {
+		reverse_proxy backend:8001 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto https
+		}
+	}
 
-    # Adminer database management
-    handle /adminer* {
-        reverse_proxy adminer:8080
-    }
+	# WebSocket for backend
+	handle /ws* {
+		reverse_proxy backend:8001 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto https
+		}
+	}
 
-    # Health check endpoint
-    handle /health {
-        respond "OK" 200
-    }
+	# Adminer database management
+	handle /adminer* {
+		reverse_proxy adminer:8080
+	}
 
-    # Root endpoint - API info
-    handle / {
-        respond "CallCenter Backend API - Healthy" 200
-    }
+	# Health check endpoint
+	handle /health {
+		respond "OK" 200
+	}
 
-    # Catch all - redirect to API docs or return 404
-    handle {
-        respond "CallCenter Backend API - Use /api/v1 endpoints" 404
-    }
+	# Root endpoint - API info
+	handle / {
+		respond "CallCenter Backend API - Healthy" 200
+	}
 
-    # Logs
-    log {
-        output stdout
-        format json
-    }
+	# Catch all - redirect to API docs or return 404
+	handle {
+		respond "CallCenter Backend API - Use /api/v1 endpoints" 404
+	}
+
+	# Logs
+	log {
+		output stdout
+		format json
+	}
 }

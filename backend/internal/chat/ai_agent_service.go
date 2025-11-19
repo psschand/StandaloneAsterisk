@@ -60,10 +60,16 @@ func (s *AIAgentService) ProcessMessage(ctx context.Context, tenantID string, co
 		}, nil
 	}
 
-	// 2. Get conversation context (using ChatSession)
+	// 2. Get conversation context (using ChatSession) and preload Widget to get WebsiteID
 	var session ChatSession
-	if err := s.db.First(&session, conversationID).Error; err != nil {
+	if err := s.db.Preload("Widget").First(&session, conversationID).Error; err != nil {
 		return nil, fmt.Errorf("failed to get conversation: %w", err)
+	}
+
+	// Get website_id from widget
+	var websiteID *int64
+	if session.Widget != nil && session.Widget.WebsiteID != nil {
+		websiteID = session.Widget.WebsiteID
 	}
 
 	// 3. Get message history (using ChatMessage)
@@ -75,11 +81,11 @@ func (s *AIAgentService) ProcessMessage(ctx context.Context, tenantID string, co
 		return nil, fmt.Errorf("failed to get message history: %w", err)
 	}
 
-	// 4. Search knowledge base (RAG)
+	// 4. Search knowledge base (RAG) - include website-specific files
 	var knowledgeContext string
 	var knowledgeIDs []int64
 	if config.RAGEnabled {
-		kb, ids, err := s.searchKnowledgeBase(tenantID, customerMessage, config.RAGMaxResults)
+		kb, ids, err := s.searchKnowledgeBase(tenantID, websiteID, customerMessage, config.RAGMaxResults, config.KBTags)
 		if err == nil && kb != "" {
 			knowledgeContext = fmt.Sprintf("\n\n=== KNOWLEDGE BASE ===\n%s\n=== END KNOWLEDGE BASE ===\n", kb)
 			knowledgeIDs = ids
@@ -185,22 +191,96 @@ func (s *AIAgentService) ProcessMessage(ctx context.Context, tenantID string, co
 	}, nil
 }
 
-// searchKnowledgeBase performs semantic search on knowledge base (RAG)
-func (s *AIAgentService) searchKnowledgeBase(tenantID, query string, maxResults int) (string, []int64, error) {
+// searchKnowledgeBase performs semantic search on knowledge base (RAG) with tag filtering and website filtering
+func (s *AIAgentService) searchKnowledgeBase(tenantID string, websiteID *int64, query string, maxResults int, kbTags interface{}) (string, []int64, error) {
 	// For now, use full-text search. In production, use vector embeddings (pgvector)
 	var kbEntries []KnowledgeBase
 
 	// Build search query
 	searchTerms := strings.ToLower(query)
 
-	err := s.db.Where("tenant_id = ? AND is_active = true", tenantID).
+	dbQuery := s.db.Where("tenant_id = ? AND is_active = true", tenantID)
+
+	// Filter by KB tags if provided
+	if kbTags != nil {
+		switch tags := kbTags.(type) {
+		case string:
+			// Single tag as string
+			if tags != "" {
+				dbQuery = dbQuery.Where("JSON_CONTAINS(tags, ?)", `"`+tags+`"`)
+			}
+		case []string:
+			// Multiple tags as array - match any
+			if len(tags) > 0 {
+				for _, tag := range tags {
+					dbQuery = dbQuery.Or("JSON_CONTAINS(tags, ?)", `"`+tag+`"`)
+				}
+			}
+		}
+	}
+
+	err := dbQuery.
 		Where("MATCH(question, answer, keywords) AGAINST(? IN NATURAL LANGUAGE MODE)", searchTerms).
 		Order("priority DESC, usage_count DESC").
 		Limit(maxResults).
 		Find(&kbEntries).Error
 
-	if err != nil || len(kbEntries) == 0 {
+	if err != nil && err.Error() != "record not found" {
 		return "", nil, err
+	}
+
+	// Also search in knowledge_base_articles table for uploaded files
+	type ArticleResult struct {
+		ID            int64  `gorm:"column:id"`
+		Title         string `gorm:"column:title"`
+		ExtractedText string `gorm:"column:extracted_text"`
+		Category      string `gorm:"column:category"`
+	}
+
+	var articles []ArticleResult
+	articlesQuery := s.db.Table("knowledge_base_articles").
+		Select("id, title, extracted_text, category").
+		Where("tenant_id = ? AND is_active = true", tenantID).
+		Where("extracted_text LIKE ?", "%"+query+"%")
+
+	// Filter by website: include tenant-wide (website_id IS NULL) OR website-specific files
+	if websiteID != nil {
+		articlesQuery = articlesQuery.Where("(website_id IS NULL OR website_id = ?)", *websiteID)
+	} else {
+		// If no website specified, only show tenant-wide files
+		articlesQuery = articlesQuery.Where("website_id IS NULL")
+	}
+
+	articlesQuery = articlesQuery.Limit(maxResults)
+
+	articlesErr := articlesQuery.Find(&articles).Error
+
+	// Convert articles to KnowledgeBase format and append
+	if articlesErr == nil && len(articles) > 0 {
+		for _, article := range articles {
+			// Extract a snippet around the match (max 500 chars for AI context)
+			snippet := extractSnippetForAI(article.ExtractedText, query, 500)
+
+			kbEntry := KnowledgeBase{
+				ID:       article.ID + 10000, // Offset to avoid ID conflicts
+				TenantID: tenantID,
+				Category: article.Category,
+				Title:    article.Title,
+				Question: "Document: " + article.Title,
+				Answer:   snippet,
+				IsActive: true,
+			}
+			kbEntries = append(kbEntries, kbEntry)
+		}
+	}
+
+	// Limit total results
+	if len(kbEntries) > maxResults {
+		kbEntries = kbEntries[:maxResults]
+	}
+
+	if len(kbEntries) == 0 {
+		return "", nil, nil
 	}
 
 	// Build context string
@@ -215,6 +295,48 @@ func (s *AIAgentService) searchKnowledgeBase(tenantID, query string, maxResults 
 	return contextBuilder.String(), ids, nil
 }
 
+// extractSnippetForAI extracts a text snippet around the search query for AI context
+func extractSnippetForAI(text, query string, maxLength int) string {
+	lowerText := strings.ToLower(text)
+	lowerQuery := strings.ToLower(query)
+
+	pos := strings.Index(lowerText, lowerQuery)
+	if pos == -1 {
+		// Query not found, return beginning
+		if len(text) > maxLength {
+			return text[:maxLength] + "..."
+		}
+		return text
+	}
+
+	// Calculate start and end positions
+	start := pos - maxLength/2
+	if start < 0 {
+		start = 0
+	}
+
+	end := start + maxLength
+	if end > len(text) {
+		end = len(text)
+		start = end - maxLength
+		if start < 0 {
+			start = 0
+		}
+	}
+
+	snippet := text[start:end]
+
+	// Add ellipsis if needed
+	if start > 0 {
+		snippet = "..." + snippet
+	}
+	if end < len(text) {
+		snippet = snippet + "..."
+	}
+
+	return snippet
+}
+
 // callGemini makes API call to Google Gemini
 func (s *AIAgentService) callGemini(ctx context.Context, apiKey, model, systemPrompt string, history []Message, userMessage string, maxTokens int, temperature float64) (string, error) {
 	// Initialize Gemini client
@@ -224,11 +346,13 @@ func (s *AIAgentService) callGemini(ctx context.Context, apiKey, model, systemPr
 	}
 	defer client.Close()
 
-	// Select model (default: gemini-pro)
+	// Select model (default: gemini-2.0-flash - latest fast and efficient model)
 	if model == "" {
-		model = "gemini-pro"
+		model = "gemini-2.0-flash"
 	}
 
+	// Gemini API requires "models/" prefix, but SDK handles it automatically
+	// Just use the model name directly
 	geminiModel := client.GenerativeModel(model)
 
 	// Configure model

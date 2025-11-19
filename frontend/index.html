@@ -7,12 +7,33 @@
     <!-- Viewport for mobile responsiveness -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     
+    <!-- SEO Meta Tags -->
+    <meta name="description" content="Soham Call Center - Enterprise cloud communication platform with AI-powered automation, multi-channel support, and real-time analytics. Trusted by businesses worldwide." />
+    <meta name="keywords" content="call center, cloud communications, AI automation, customer support, omnichannel, VoIP, contact center, WebRTC" />
+    <meta name="author" content="Soham Technologies" />
+    <meta name="robots" content="index, follow" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://app.soham.top/" />
+    <meta property="og:title" content="Soham Call Center - Cloud Communication Platform" />
+    <meta property="og:description" content="Enterprise-grade call center solution with AI automation, multi-channel support, and powerful analytics." />
+    <meta property="og:site_name" content="Soham Call Center" />
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://app.soham.top/" />
+    <meta property="twitter:title" content="Soham Call Center - Cloud Communication Platform" />
+    <meta property="twitter:description" content="Enterprise-grade call center solution with AI automation and multi-channel support." />
+    
+    <!-- Verification Tags (add your verification codes when available) -->
+    <!-- <meta name="google-site-verification" content="YOUR_VERIFICATION_CODE" /> -->
+    
     <!-- PWA Meta Tags -->
-    <meta name="description" content="Unified omnichannel communication platform with AI-powered call center, chat, and helpdesk" />
     <meta name="theme-color" content="#4f46e5" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="CallCenter" />
+    <meta name="apple-mobile-web-app-title" content="Soham CallCenter" />
     
     <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json" />
@@ -24,25 +45,38 @@
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/icon-192.svg" />
     
-    <title>CallCenter - Omnichannel Platform</title>
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://app.soham.top/" />
+    
+    <title>Soham Call Center - Enterprise Cloud Communication Platform</title>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     
-    <!-- Service Worker Registration -->
+    <!-- Service Worker Registration - DISABLED FOR DEVELOPMENT -->
     <script>
+      // Unregister any existing service workers to clear cache
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then(registration => {
-              console.log('✅ Service Worker registered:', registration.scope);
-            })
-            .catch(error => {
-              console.log('❌ Service Worker registration failed:', error);
-            });
+        navigator.serviceWorker.getRegistrations().then(registrations => {
+          registrations.forEach(registration => {
+            registration.unregister();
+            console.log('🗑️ Service Worker unregistered:', registration.scope);
+          });
         });
       }
+      
+      // Clear all caches
+      if ('caches' in window) {
+        caches.keys().then(cacheNames => {
+          cacheNames.forEach(cacheName => {
+            caches.delete(cacheName);
+            console.log('🗑️ Cache deleted:', cacheName);
+          });
+        });
+      }
+      
+      console.log('🔄 Service Worker disabled - using network-only mode for development');
     </script>
   </body>
 </html>

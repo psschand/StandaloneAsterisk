@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuthStore } from '../store/authStore';
 import axios from 'axios';
 import {
@@ -76,8 +76,15 @@ export default function WidgetDemoPage() {
   const [messages, setMessages] = useState<any[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [sessionKey, setSessionKey] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<number | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [agentAssigned, setAgentAssigned] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   // Load widget configuration
   useEffect(() => {
@@ -92,28 +99,109 @@ export default function WidgetDemoPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Handle pre-chat form state based on config
+  // WebSocket connection for real-time manager messages
   useEffect(() => {
-    if (isOpen) {
-      if (!config.enable_pre_chat_form) {
-        // Pre-chat form disabled - always skip form
-        if (showPreChatForm || messages.length === 0) {
-          setShowPreChatForm(false);
-          if (messages.length === 0) {
-            setMessages([{
-              id: 1,
-              type: 'bot',
-              text: config.greeting_message,
-              timestamp: new Date(),
-            }]);
-          }
+    if (!sessionKey) return; // Only connect if we have an active session
+
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout>;
+    let isCleanup = false;
+
+    const connect = () => {
+      if (isCleanup) return;
+
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${window.location.hostname}:8443/ws/public/${sessionKey}`;
+      
+      console.log('🔌 Widget connecting to WebSocket:', wsUrl);
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log('✅ Widget WebSocket connected');
+        
+        // Subscribe to chat events for this session
+        if (ws) {
+          ws.send(JSON.stringify({
+            type: 'subscribe',
+            payload: {
+              topics: ['chat.message.new']
+            }
+          }));
         }
-      } else if (config.enable_pre_chat_form && messages.length === 0) {
-        // Pre-chat form enabled - ensure form is shown for new chats
-        setShowPreChatForm(true);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('📨 Widget received WebSocket message:', data);
+          
+          if (data.type === 'chat.message.new' && data.payload) {
+            const msg = data.payload;
+            
+            console.log('🔍 Message filter check:', {
+              msg_session_id: msg.session_id,
+              widget_sessionId: sessionId,
+              msg_sender_type: msg.sender_type,
+              match: msg.session_id === sessionId,
+              sender_ok: msg.sender_type === 'agent' || msg.sender_type === 'bot'
+            });
+            
+            // Only add if it's for this session and from agent/bot (not from visitor)
+            if (msg.session_id === sessionId && (msg.sender_type === 'agent' || msg.sender_type === 'bot')) {
+              console.log('💬 Adding message to widget:', msg.sender_type, msg.body);
+              
+              // Add message to widget UI
+              setMessages(prev => {
+                // Check if message already exists (deduplication)
+                if (prev.some(m => m.id === msg.message_id)) {
+                  return prev;
+                }
+                
+                return [...prev, {
+                  id: msg.message_id,
+                  type: msg.sender_type === 'agent' ? 'agent' : 'bot',
+                  text: msg.body,
+                  timestamp: new Date(msg.timestamp || Date.now()),
+                  sender_name: msg.sender_name || (msg.sender_type === 'bot' ? 'AI Assistant' : 'Agent'),
+                }];
+              });
+              
+              // Set typing indicator off
+              setIsTyping(false);
+            }
+          }
+        } catch (error) {
+          console.error('❌ Error parsing WebSocket message:', error);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error('❌ Widget WebSocket error:', error);
+      };
+
+      ws.onclose = () => {
+        console.log('🔌 Widget WebSocket disconnected');
+        
+        // Attempt to reconnect after 3 seconds
+        if (!isCleanup && sessionKey) {
+          console.log('🔄 Reconnecting in 3 seconds...');
+          reconnectTimeout = setTimeout(connect, 3000);
+        }
+      };
+    };
+
+    connect();
+
+    return () => {
+      isCleanup = true;
+      clearTimeout(reconnectTimeout);
+      if (ws) {
+        ws.close();
       }
-    }
-  }, [config.enable_pre_chat_form, isOpen]);
+    };
+  }, [sessionKey]);
+
+
   
   // Show proactive message after delay
   useEffect(() => {
@@ -131,7 +219,13 @@ export default function WidgetDemoPage() {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (response.data.success) {
-        setConfig({ ...config, ...response.data.data });
+        const widgetData = response.data.data;
+        // Merge widget data and settings into config
+        setConfig({ 
+          ...config, 
+          ...widgetData,
+          ...(widgetData.settings || {}) // Merge settings object
+        });
       }
     } catch (error) {
       console.error('Failed to load widget:', error);
@@ -142,19 +236,22 @@ export default function WidgetDemoPage() {
     setIsOpen(true);
     setShowProactive(false);
     
-    if (!config.enable_pre_chat_form) {
-      // Pre-chat form disabled - start chat immediately
+    if (config.enable_pre_chat_form) {
+      // Pre-chat form enabled - show form first
+      setShowPreChatForm(true);
+      setMessages([]);
+    } else {
+      // Pre-chat form disabled - start chat immediately with greeting
       setShowPreChatForm(false);
       setMessages([{
         id: 1,
         type: 'bot',
         text: config.greeting_message,
+        sender_name: 'AI Assistant',
         timestamp: new Date(),
       }]);
-    } else {
-      // Pre-chat form enabled - show form first
-      setShowPreChatForm(true);
-      setMessages([]);
+      // Start session in the background
+      handleStartChat();
     }
   };
 
@@ -163,6 +260,7 @@ export default function WidgetDemoPage() {
     
     // Start a real chat session with the backend
     try {
+      console.log('🚀 Starting chat session...');
       const response = await axios.post('/api/v1/chat/public/start', {
         tenant_id: 'demo-tenant',
         channel: 'web-widget',
@@ -171,27 +269,39 @@ export default function WidgetDemoPage() {
       });
 
       if (response.data.success) {
-        const { session_id, message } = response.data.data;
-        setSessionKey(session_id);
+        const { session_id, conversation_id } = response.data.data;
         
+        console.log('✅ Chat session started:', { session_id, conversation_id });
+        
+        // Update state with session info
+        setSessionKey(session_id);
+        setSessionId(conversation_id);
+        
+        // Show greeting message
         setMessages([{
           id: 1,
           type: 'bot',
-          text: message || config.greeting_message,
+          text: config.greeting_message,
           sender_name: 'AI Assistant',
           timestamp: new Date(),
         }]);
+        
+        return { session_id, conversation_id }; // Return for immediate use
+      } else {
+        console.error('❌ Start session failed - no success flag');
+        return null;
       }
     } catch (error) {
-      console.error('Failed to start chat session:', error);
-      // Fallback to greeting message
+      console.error('❌ Failed to start chat session:', error);
+      // Show error message
       setMessages([{
         id: 1,
         type: 'bot',
-        text: config.greeting_message,
-        sender_name: 'AI Assistant',
+        text: 'Failed to start chat session. Please try again.',
+        sender_name: 'System',
         timestamp: new Date(),
       }]);
+      return null;
     }
   };
 
@@ -211,24 +321,48 @@ export default function WidgetDemoPage() {
     setInputValue('');
     setIsTyping(true);
 
-    // If no session, start one first
-    if (!sessionKey) {
-      await handleStartChat();
-      // Wait a bit for session to be created
+    // If no session, start one first, then send this message
+    let currentSessionKey = sessionKey;
+    if (!currentSessionKey) {
+      console.log('⚠️ No session key - starting chat session first with message:', userMessage);
+      const sessionData = await handleStartChat();
+      
+      if (!sessionData || !sessionData.session_id) {
+        console.error('❌ Failed to create session - cannot send message');
+        setIsTyping(false);
+        setMessages(prev => [...prev, {
+          id: prev.length + 1,
+          type: 'bot',
+          text: 'Failed to start chat session. Please refresh the page and try again.',
+          sender_name: 'System',
+          timestamp: new Date(),
+        }]);
+        return;
+      }
+      
+      currentSessionKey = sessionData.session_id;
+      console.log('✅ Session created, now sending first message:', userMessage);
+      
+      // Small delay to ensure WebSocket is connected
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
     try {
+      console.log('📤 Sending message with session_id:', currentSessionKey);
+      
       // Send message to backend AI
       const response = await axios.post('/api/v1/chat/public/message', {
-        session_id: sessionKey,
+        session_id: currentSessionKey,
         message: userMessage,
       });
+
+      console.log('✅ POST response received:', response.data);
 
       setIsTyping(false);
 
       if (response.data.success) {
         const aiResponse = response.data.data;
+        console.log('🤖 AI Response data:', aiResponse);
         
         // Check if agent was assigned or handover triggered
         if (aiResponse.is_agent || aiResponse.status === 'agent_assigned') {
@@ -240,26 +374,37 @@ export default function WidgetDemoPage() {
           setAgentAssigned(true);
         }
 
-        setMessages(prev => [...prev, {
-          id: prev.length + 1,
-          type: aiResponse.is_agent ? 'agent' : 'bot',
-          text: aiResponse.content,
-          sender_name: aiResponse.sender_name || 'AI Assistant',
-          timestamp: new Date(aiResponse.timestamp),
-          confidence: aiResponse.confidence,
-          intent: aiResponse.intent,
-          sentiment: aiResponse.sentiment,
-        }]);
+        // DON'T add message here - WebSocket will handle it to avoid duplicates
+        // AI/Agent response will come via WebSocket broadcast
+      } else {
+        console.error('❌ Response success=false:', response.data);
       }
     } catch (error: any) {
       setIsTyping(false);
-      console.error('Failed to send message:', error);
+      console.error('❌ Failed to send message:', error);
+      console.error('Error details:', {
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        message: error.message,
+      });
+      
+      // Determine error message based on status
+      let errorMessage = 'Sorry, I encountered an error. Please try again or contact support.';
+      if (error.response?.status === 422) {
+        errorMessage = 'Invalid request. Please refresh the page and try again.';
+        console.error('422 Validation Error - likely missing or invalid session_id');
+      } else if (error.response?.status === 404) {
+        errorMessage = 'Session not found. Please refresh the page and start a new chat.';
+      } else if (error.response?.data?.error?.message) {
+        errorMessage = error.response.data.error.message;
+      }
       
       // Show error message to user
       setMessages(prev => [...prev, {
         id: prev.length + 1,
         type: 'bot',
-        text: 'Sorry, I encountered an error. Please try again or contact support.',
+        text: errorMessage,
         sender_name: 'System',
         timestamp: new Date(),
         error: error.response?.data?.error?.message || error.message,
@@ -471,7 +616,7 @@ export default function WidgetDemoPage() {
                     </div>
                   )}
 
-                  {config.pre_chat_fields.slice(0, 3).map((field: any) => (
+                  {Array.isArray(config.pre_chat_fields) && config.pre_chat_fields.slice(0, 3).map((field: any) => (
                     <div key={field.id}>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         {field.label} {field.required && <span className="text-red-500">*</span>}
@@ -579,7 +724,10 @@ export default function WidgetDemoPage() {
                     </div>
                   )}
 
-                  {config.enable_quick_replies && config.quick_replies.length > 0 && messages.length === 1 && (
+                  {/* Auto-scroll anchor */}
+                  <div ref={messagesEndRef} />
+
+                  {config.enable_quick_replies && Array.isArray(config.quick_replies) && config.quick_replies.length > 0 && messages.length === 1 && (
                     <div className="flex flex-wrap gap-2 mt-4">
                       {config.quick_replies.slice(0, 3).map((reply: string, index: number) => (
                         <button
@@ -594,7 +742,7 @@ export default function WidgetDemoPage() {
                     </div>
                   )}
 
-                  {config.enable_product_showcase && config.showcase_products.length > 0 && messages.length === 1 && (
+                  {config.enable_product_showcase && Array.isArray(config.showcase_products) && config.showcase_products.length > 0 && messages.length === 1 && (
                     <div className="space-y-2 mt-4">
                       {config.showcase_products.slice(0, 2).map((product: any, index: number) => (
                         <div key={index} className="bg-white rounded-lg p-3 shadow-sm border border-gray-200">

@@ -17,6 +17,13 @@ import {
   Shield,
   Smartphone,
   BookOpen,
+  Bot,
+  Globe,
+  UserCog,
+  Layers,
+  Palette,
+  BarChart3,
+  PhoneCall,
 } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import type { UserRole } from '../../types';
@@ -34,24 +41,38 @@ const allNavigation: NavItem[] = [
   // Superadmin-only sections
   { name: 'Tenants', href: '/admin/tenants', icon: Building2, roles: ['superadmin'] },
   { name: 'System Users', href: '/admin/users', icon: Shield, roles: ['superadmin'] },
+  { name: 'Security', href: '/admin/security', icon: Shield, roles: ['superadmin', 'tenant_admin', 'admin'] },
   
-  // Admin-only sections (tenant_admin)
-  { name: 'Knowledge Base', href: '/admin/knowledge-base', icon: BookOpen, roles: ['superadmin', 'tenant_admin', 'manager'] },
-  { name: 'Extensions', href: '/extensions', icon: Settings, roles: ['superadmin', 'tenant_admin'] },
-  { name: 'DIDs', href: '/dids', icon: Phone, roles: ['superadmin', 'tenant_admin'] },
+  // Call Center Telephony - Admin Configuration
+  { name: 'Extensions', href: '/admin/extensions', icon: Phone, roles: ['superadmin', 'tenant_admin', 'admin'] },
+  { name: 'DIDs', href: '/dids', icon: Phone, roles: ['superadmin', 'tenant_admin', 'admin'] },
+  { name: 'Queues', href: '/queues', icon: ListOrdered, roles: ['superadmin', 'tenant_admin', 'admin', 'manager'] },
+  { name: 'Queue Dashboard', href: '/queue-dashboard', icon: BarChart3, roles: ['superadmin', 'tenant_admin', 'admin', 'manager'] },
+  { name: 'Agents', href: '/agents', icon: Users, roles: ['superadmin', 'tenant_admin', 'admin', 'manager'] },
   
-  // Admin/Manager sections
-  { name: 'Queues', href: '/queues', icon: ListOrdered, roles: ['superadmin', 'tenant_admin', 'manager'] },
-  { name: 'Agents', href: '/agents', icon: Users, roles: ['superadmin', 'tenant_admin', 'manager'] },
-  { name: 'Reports', href: '/reports', icon: FileText, roles: ['superadmin', 'tenant_admin', 'manager'] },
+  // Call Center Operations - Agent/Manager
+  { name: 'Calls', href: '/calls', icon: Phone, roles: ['superadmin', 'tenant_admin', 'admin', 'manager', 'agent'] },
+  { name: 'Call Control', href: '/call-control', icon: PhoneCall, roles: ['superadmin', 'tenant_admin', 'admin', 'manager', 'agent'] },
+  { name: 'Softphone', href: '/softphone', icon: Smartphone, roles: ['superadmin', 'tenant_admin', 'admin', 'manager', 'agent'] },
+  { name: 'CDRs', href: '/cdrs', icon: FileText, roles: ['superadmin', 'tenant_admin', 'admin', 'manager', 'agent'] },
   
-  // Agent sections (customer-facing work)
-  { name: 'Calls', href: '/calls', icon: Phone, roles: ['superadmin', 'tenant_admin', 'manager', 'agent'] },
-  { name: 'Contacts', href: '/contacts', icon: UserCircle, roles: ['superadmin', 'tenant_admin', 'manager', 'agent'] },
-  { name: 'CDRs', href: '/cdrs', icon: FileText, roles: ['superadmin', 'tenant_admin', 'manager', 'agent'] },
-  { name: 'Tickets', href: '/tickets', icon: MessageSquare, roles: ['superadmin', 'tenant_admin', 'manager', 'agent'] },
-  { name: 'Chat', href: '/chat', icon: MessageCircle, roles: ['superadmin', 'tenant_admin', 'manager', 'agent'] },
-  { name: 'Softphone', href: '/softphone', icon: Smartphone, roles: ['superadmin', 'tenant_admin', 'manager', 'agent'] },
+  // Omnichannel Chat - Admin Configuration
+  { name: 'Websites', href: '/websites', icon: Globe, roles: ['superadmin', 'tenant_admin', 'admin', 'manager'] },
+  { name: 'Widget Designer', href: '/chat-widget-designer', icon: Palette, roles: ['superadmin', 'tenant_admin', 'admin', 'manager'] },
+  { name: 'Widget Management', href: '/widget-management', icon: Layers, roles: ['superadmin', 'tenant_admin', 'admin', 'manager'] },
+  { name: 'AI Agents', href: '/ai-agents', icon: Bot, roles: ['superadmin', 'tenant_admin', 'admin', 'manager'] },
+  { name: 'AI Profiles', href: '/ai-profiles', icon: UserCog, roles: ['superadmin', 'tenant_admin', 'admin', 'manager'] },
+  
+  // Omnichannel Chat - Operations
+  { name: 'Chat', href: '/chat', icon: MessageCircle, roles: ['superadmin', 'tenant_admin', 'admin', 'manager', 'agent'] },
+  
+  // Shared - Customer Management
+  { name: 'Contacts', href: '/contacts', icon: UserCircle, roles: ['superadmin', 'tenant_admin', 'admin', 'manager', 'agent'] },
+  { name: 'Tickets', href: '/tickets', icon: MessageSquare, roles: ['superadmin', 'tenant_admin', 'admin', 'manager', 'agent'] },
+  
+  // Shared - Knowledge & Reporting
+  { name: 'Knowledge Base', href: '/admin/knowledge-base', icon: BookOpen, roles: ['superadmin', 'tenant_admin', 'admin', 'manager'] },
+  { name: 'Reports', href: '/reports', icon: FileText, roles: ['superadmin', 'tenant_admin', 'admin', 'manager'] },
   
   // All authenticated users
   { name: 'Settings', href: '/settings', icon: Settings },

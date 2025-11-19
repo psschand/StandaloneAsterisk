@@ -143,10 +143,7 @@ func (h *QueueHandler) AddMember(c *gin.Context) {
 		return
 	}
 
-	// Extract userID from request body or context
-	userID := c.GetInt64("user_id") // Get from authenticated user context
-
-	if err := h.queueService.AddMember(c.Request.Context(), queueID, userID, &req); err != nil {
+	if err := h.queueService.AddMember(c.Request.Context(), queueID, &req); err != nil {
 		response.Error(c, err)
 		return
 	}

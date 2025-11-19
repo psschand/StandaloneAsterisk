@@ -49,23 +49,50 @@ func (s *tenantService) Create(ctx context.Context, req *dto.CreateTenantRequest
 	// Generate tenant ID from name
 	tenantID := generateTenantID(req.Name)
 
+	// Auto-assign extension range if not provided
+	extensionRangeStart := 1000
+	extensionRangeEnd := 1999
+
+	if req.ExtensionRangeStart != nil && req.ExtensionRangeEnd != nil {
+		// Use provided ranges
+		extensionRangeStart = *req.ExtensionRangeStart
+		extensionRangeEnd = *req.ExtensionRangeEnd
+
+		// Validate range
+		if extensionRangeEnd <= extensionRangeStart {
+			return nil, errors.NewValidation("extension_range_end must be greater than extension_range_start")
+		}
+	} else {
+		// Auto-assign next available range
+		maxEnd, err := s.tenantRepo.GetMaxExtensionRangeEnd(ctx)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get max extension range")
+		}
+
+		// Next range starts at maxEnd + 1
+		extensionRangeStart = maxEnd + 1
+		extensionRangeEnd = extensionRangeStart + 999 // 1000 extensions per tenant
+	}
+
 	// Create tenant
 	now := time.Now()
 	tenant := &core.Tenant{
-		ID:                 tenantID,
-		Name:               req.Name,
-		Domain:             req.Domain,
-		Status:             "active",
-		MaxAgents:          req.MaxAgents,
-		MaxDIDs:            req.MaxDIDs,
-		MaxConcurrentCalls: req.MaxConcurrentCalls,
-		Features:           req.Features,
-		Settings:           req.Settings,
-		BillingEmail:       req.BillingEmail,
-		ContactName:        req.ContactName,
-		ContactPhone:       req.ContactPhone,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:                  tenantID,
+		Name:                req.Name,
+		Domain:              req.Domain,
+		Status:              "active",
+		MaxAgents:           req.MaxAgents,
+		MaxDIDs:             req.MaxDIDs,
+		MaxConcurrentCalls:  req.MaxConcurrentCalls,
+		ExtensionRangeStart: extensionRangeStart,
+		ExtensionRangeEnd:   extensionRangeEnd,
+		Features:            req.Features,
+		Settings:            req.Settings,
+		BillingEmail:        req.BillingEmail,
+		ContactName:         req.ContactName,
+		ContactPhone:        req.ContactPhone,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 
 	if err := s.tenantRepo.Create(ctx, tenant); err != nil {
@@ -73,17 +100,19 @@ func (s *tenantService) Create(ctx context.Context, req *dto.CreateTenantRequest
 	}
 
 	return &dto.TenantResponse{
-		ID:                 tenant.ID,
-		Name:               tenant.Name,
-		Domain:             tenant.Domain,
-		Status:             tenant.Status,
-		MaxAgents:          tenant.MaxAgents,
-		MaxDIDs:            tenant.MaxDIDs,
-		MaxConcurrentCalls: tenant.MaxConcurrentCalls,
-		Features:           tenant.Features,
-		Settings:           tenant.Settings,
-		CreatedAt:          tenant.CreatedAt,
-		UpdatedAt:          tenant.UpdatedAt,
+		ID:                  tenant.ID,
+		Name:                tenant.Name,
+		Domain:              tenant.Domain,
+		Status:              tenant.Status,
+		MaxAgents:           tenant.MaxAgents,
+		MaxDIDs:             tenant.MaxDIDs,
+		MaxConcurrentCalls:  tenant.MaxConcurrentCalls,
+		ExtensionRangeStart: tenant.ExtensionRangeStart,
+		ExtensionRangeEnd:   tenant.ExtensionRangeEnd,
+		Features:            tenant.Features,
+		Settings:            tenant.Settings,
+		CreatedAt:           tenant.CreatedAt,
+		UpdatedAt:           tenant.UpdatedAt,
 	}, nil
 }
 
@@ -95,17 +124,19 @@ func (s *tenantService) GetByID(ctx context.Context, id string) (*dto.TenantResp
 	}
 
 	return &dto.TenantResponse{
-		ID:                 tenant.ID,
-		Name:               tenant.Name,
-		Domain:             tenant.Domain,
-		Status:             tenant.Status,
-		MaxAgents:          tenant.MaxAgents,
-		MaxDIDs:            tenant.MaxDIDs,
-		MaxConcurrentCalls: tenant.MaxConcurrentCalls,
-		Features:           tenant.Features,
-		Settings:           tenant.Settings,
-		CreatedAt:          tenant.CreatedAt,
-		UpdatedAt:          tenant.UpdatedAt,
+		ID:                  tenant.ID,
+		Name:                tenant.Name,
+		Domain:              tenant.Domain,
+		Status:              tenant.Status,
+		MaxAgents:           tenant.MaxAgents,
+		MaxDIDs:             tenant.MaxDIDs,
+		MaxConcurrentCalls:  tenant.MaxConcurrentCalls,
+		ExtensionRangeStart: tenant.ExtensionRangeStart,
+		ExtensionRangeEnd:   tenant.ExtensionRangeEnd,
+		Features:            tenant.Features,
+		Settings:            tenant.Settings,
+		CreatedAt:           tenant.CreatedAt,
+		UpdatedAt:           tenant.UpdatedAt,
 	}, nil
 }
 
@@ -119,17 +150,19 @@ func (s *tenantService) GetAll(ctx context.Context, page, pageSize int) ([]dto.T
 	responses := make([]dto.TenantResponse, len(tenants))
 	for i, tenant := range tenants {
 		responses[i] = dto.TenantResponse{
-			ID:                 tenant.ID,
-			Name:               tenant.Name,
-			Domain:             tenant.Domain,
-			Status:             tenant.Status,
-			MaxAgents:          tenant.MaxAgents,
-			MaxDIDs:            tenant.MaxDIDs,
-			MaxConcurrentCalls: tenant.MaxConcurrentCalls,
-			Features:           tenant.Features,
-			Settings:           tenant.Settings,
-			CreatedAt:          tenant.CreatedAt,
-			UpdatedAt:          tenant.UpdatedAt,
+			ID:                  tenant.ID,
+			Name:                tenant.Name,
+			Domain:              tenant.Domain,
+			Status:              tenant.Status,
+			MaxAgents:           tenant.MaxAgents,
+			MaxDIDs:             tenant.MaxDIDs,
+			MaxConcurrentCalls:  tenant.MaxConcurrentCalls,
+			ExtensionRangeStart: tenant.ExtensionRangeStart,
+			ExtensionRangeEnd:   tenant.ExtensionRangeEnd,
+			Features:            tenant.Features,
+			Settings:            tenant.Settings,
+			CreatedAt:           tenant.CreatedAt,
+			UpdatedAt:           tenant.UpdatedAt,
 		}
 	}
 
@@ -184,6 +217,28 @@ func (s *tenantService) Update(ctx context.Context, id string, req *dto.UpdateTe
 		tenant.ContactPhone = req.ContactPhone
 	}
 
+	// Update extension ranges if provided
+	if req.ExtensionRangeStart != nil || req.ExtensionRangeEnd != nil {
+		// Get current values or use provided values
+		newStart := tenant.ExtensionRangeStart
+		newEnd := tenant.ExtensionRangeEnd
+
+		if req.ExtensionRangeStart != nil {
+			newStart = *req.ExtensionRangeStart
+		}
+		if req.ExtensionRangeEnd != nil {
+			newEnd = *req.ExtensionRangeEnd
+		}
+
+		// Validate range
+		if newEnd <= newStart {
+			return nil, errors.NewValidation("extension_range_end must be greater than extension_range_start")
+		}
+
+		tenant.ExtensionRangeStart = newStart
+		tenant.ExtensionRangeEnd = newEnd
+	}
+
 	tenant.UpdatedAt = time.Now()
 
 	if err := s.tenantRepo.Update(ctx, tenant); err != nil {
@@ -191,17 +246,19 @@ func (s *tenantService) Update(ctx context.Context, id string, req *dto.UpdateTe
 	}
 
 	return &dto.TenantResponse{
-		ID:                 tenant.ID,
-		Name:               tenant.Name,
-		Domain:             tenant.Domain,
-		Status:             tenant.Status,
-		MaxAgents:          tenant.MaxAgents,
-		MaxDIDs:            tenant.MaxDIDs,
-		MaxConcurrentCalls: tenant.MaxConcurrentCalls,
-		Features:           tenant.Features,
-		Settings:           tenant.Settings,
-		CreatedAt:          tenant.CreatedAt,
-		UpdatedAt:          tenant.UpdatedAt,
+		ID:                  tenant.ID,
+		Name:                tenant.Name,
+		Domain:              tenant.Domain,
+		Status:              tenant.Status,
+		MaxAgents:           tenant.MaxAgents,
+		MaxDIDs:             tenant.MaxDIDs,
+		MaxConcurrentCalls:  tenant.MaxConcurrentCalls,
+		ExtensionRangeStart: tenant.ExtensionRangeStart,
+		ExtensionRangeEnd:   tenant.ExtensionRangeEnd,
+		Features:            tenant.Features,
+		Settings:            tenant.Settings,
+		CreatedAt:           tenant.CreatedAt,
+		UpdatedAt:           tenant.UpdatedAt,
 	}, nil
 }
 
@@ -228,17 +285,19 @@ func (s *tenantService) GetByDomain(ctx context.Context, domain string) (*dto.Te
 	}
 
 	return &dto.TenantResponse{
-		ID:                 tenant.ID,
-		Name:               tenant.Name,
-		Domain:             tenant.Domain,
-		Status:             tenant.Status,
-		MaxAgents:          tenant.MaxAgents,
-		MaxDIDs:            tenant.MaxDIDs,
-		MaxConcurrentCalls: tenant.MaxConcurrentCalls,
-		Features:           tenant.Features,
-		Settings:           tenant.Settings,
-		CreatedAt:          tenant.CreatedAt,
-		UpdatedAt:          tenant.UpdatedAt,
+		ID:                  tenant.ID,
+		Name:                tenant.Name,
+		Domain:              tenant.Domain,
+		Status:              tenant.Status,
+		MaxAgents:           tenant.MaxAgents,
+		MaxDIDs:             tenant.MaxDIDs,
+		MaxConcurrentCalls:  tenant.MaxConcurrentCalls,
+		ExtensionRangeStart: tenant.ExtensionRangeStart,
+		ExtensionRangeEnd:   tenant.ExtensionRangeEnd,
+		Features:            tenant.Features,
+		Settings:            tenant.Settings,
+		CreatedAt:           tenant.CreatedAt,
+		UpdatedAt:           tenant.UpdatedAt,
 	}, nil
 }
 

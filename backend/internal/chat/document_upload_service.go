@@ -2,9 +2,11 @@ package chat
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -30,10 +32,11 @@ func NewDocumentUploadService(db *gorm.DB, kbService *KnowledgeBaseService) *Doc
 
 // UploadDocumentRequest represents document upload data
 type UploadDocumentRequest struct {
-	TenantID string `json:"tenant_id"`
-	Category string `json:"category" binding:"required"`
-	Language string `json:"language"`
-	Priority int    `json:"priority"`
+	TenantID  string `json:"tenant_id"`
+	WebsiteID *int64 `json:"website_id"` // Optional: specific website, null = tenant-wide
+	Category  string `json:"category" binding:"required"`
+	Language  string `json:"language"`
+	Priority  int    `json:"priority"`
 }
 
 // UploadDocumentResponse represents upload result
@@ -45,12 +48,15 @@ type UploadDocumentResponse struct {
 	Chunks         []string `json:"chunks,omitempty"`
 }
 
-// ProcessDocument processes uploaded document and creates KB entries
+// ProcessDocument processes uploaded document and creates KB entry with file upload
 func (s *DocumentUploadService) ProcessDocument(ctx context.Context, file *multipart.FileHeader, req *UploadDocumentRequest) (*UploadDocumentResponse, error) {
 	// Validate file type
 	ext := strings.ToLower(filepath.Ext(file.Filename))
-	if ext != ".pdf" && ext != ".txt" && ext != ".doc" && ext != ".docx" {
-		return nil, errors.NewValidation("only PDF, TXT, DOC, and DOCX files are supported")
+	supportedExts := map[string]bool{
+		".pdf": true, ".txt": true, ".doc": true, ".docx": true, ".csv": true,
+	}
+	if !supportedExts[ext] {
+		return nil, errors.NewValidation("only PDF, TXT, CSV, DOC, and DOCX files are supported")
 	}
 
 	// Open file
@@ -60,69 +66,103 @@ func (s *DocumentUploadService) ProcessDocument(ctx context.Context, file *multi
 	}
 	defer src.Close()
 
+	// Save file to storage first
+	storagePath := "/app/storage/knowledge_base"
+	if envPath := filepath.Clean("/app/storage/knowledge_base"); envPath != "" {
+		storagePath = envPath
+	}
+
+	tenantDir := filepath.Join(storagePath, req.TenantID)
+	if err := ensureDir(tenantDir); err != nil {
+		return nil, errors.Wrap(err, "failed to create storage directory")
+	}
+
+	// Generate unique filename
+	timestamp := time.Now().UnixNano()
+	filename := fmt.Sprintf("%d_%s", timestamp, sanitizeFilename(file.Filename))
+	filePath := filepath.Join(tenantDir, filename)
+
+	// Save file
+	dst, err := createFile(filePath)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create destination file")
+	}
+	defer dst.Close()
+
+	// Reset source reader
+	src.Close()
+	src, err = file.Open()
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return nil, errors.Wrap(err, "failed to save file")
+	}
+	dst.Close() // Close early so we can read it
+
 	// Extract text based on file type
-	var text string
+	var extractedText string
 	switch ext {
 	case ".pdf":
-		text, err = s.extractTextFromPDF(src)
+		extractedText, err = s.extractPDFText(filePath)
 	case ".txt":
-		text, err = s.extractTextFromTXT(src)
+		extractedText, err = s.extractPlainText(filePath)
+	case ".csv":
+		extractedText, err = s.extractCSVText(filePath)
 	case ".doc", ".docx":
-		text, err = s.extractTextFromDOCX(src)
-	default:
-		return nil, errors.NewValidation("unsupported file type")
+		extractedText, err = s.extractWordText(filePath)
 	}
 
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to extract text from document")
+		// Don't fail - just log and store file without extracted text
+		extractedText = fmt.Sprintf("[Text extraction failed: %v]\nFile stored successfully for manual review.", err)
 	}
 
-	if len(text) == 0 {
-		return nil, errors.NewValidation("no text found in document")
+	// Generate title from filename
+	title := strings.TrimSuffix(filepath.Base(file.Filename), ext)
+	title = strings.ReplaceAll(title, "_", " ")
+	title = strings.ReplaceAll(title, "-", " ")
+
+	// Insert directly into knowledge_base_articles table with file support
+	fileTypeClean := strings.TrimPrefix(ext, ".")
+
+	query := `
+		INSERT INTO knowledge_base_articles 
+		(tenant_id, website_id, title, content, content_type,
+		 file_type, file_path, file_size, file_original_name, extracted_text,
+		 category, tags, priority, is_active, created_at, updated_at)
+		VALUES (?, ?, ?, '', 'file', ?, ?, ?, ?, ?, ?, '[]', ?, true, NOW(), NOW())
+	`
+
+	result := s.db.Exec(query,
+		req.TenantID,
+		req.WebsiteID, // website_id from request (NULL for tenant-wide, or specific website ID)
+		title,
+		fileTypeClean,
+		filePath,
+		file.Size,
+		file.Filename,
+		extractedText,
+		req.Category,
+		req.Priority,
+	)
+
+	if result.Error != nil {
+		// Clean up file on error
+		removeFile(filePath)
+		return nil, errors.Wrap(result.Error, "failed to create KB article")
 	}
 
-	// Split text into chunks (max 2000 chars per chunk for better context)
-	chunks := s.splitTextIntoChunks(text, 2000)
-
-	// Create knowledge base entries
-	entriesCreated := 0
-	for i, chunk := range chunks {
-		if len(strings.TrimSpace(chunk)) < 50 {
-			continue // Skip very short chunks
-		}
-
-		// Try to create a meaningful title from first 100 chars
-		title := strings.TrimSpace(chunk)
-		if len(title) > 100 {
-			title = title[:100] + "..."
-		}
-
-		kbEntry := &CreateKBRequest{
-			TenantID: req.TenantID,
-			Category: req.Category,
-			Title:    fmt.Sprintf("%s - Part %d", filepath.Base(file.Filename), i+1),
-			Question: title,
-			Answer:   chunk,
-			Keywords: s.extractKeywords(chunk),
-			Language: req.Language,
-			Priority: req.Priority,
-			IsActive: true,
-		}
-
-		_, err := s.knowledgeBaseService.CreateEntry(ctx, kbEntry)
-		if err != nil {
-			// Log error but continue with other chunks
-			continue
-		}
-		entriesCreated++
-	}
+	// Get inserted ID
+	var lastID int64
+	s.db.Raw("SELECT LAST_INSERT_ID()").Scan(&lastID)
 
 	return &UploadDocumentResponse{
-		EntriesCreated: entriesCreated,
+		EntriesCreated: 1, // One article per file
 		Filename:       file.Filename,
-		FileType:       ext,
-		TextExtracted:  len(text),
-		Chunks:         chunks[:min(3, len(chunks))], // Return first 3 chunks as preview
+		FileType:       fileTypeClean,
+		TextExtracted:  len(extractedText),
 	}, nil
 }
 
@@ -332,4 +372,116 @@ type KnowledgeBaseDocument struct {
 // TableName specifies the table name
 func (KnowledgeBaseDocument) TableName() string {
 	return "knowledge_base_documents"
+}
+
+// Helper functions for file operations
+func ensureDir(path string) error {
+	return os.MkdirAll(path, 0755)
+}
+
+func createFile(path string) (*os.File, error) {
+	return os.Create(path)
+}
+
+func removeFile(path string) error {
+	return os.Remove(path)
+}
+
+func sanitizeFilename(filename string) string {
+	// Remove unsafe characters
+	safe := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, filename)
+	return safe
+}
+
+// extractPDFText extracts text from PDF file path
+func (s *DocumentUploadService) extractPDFText(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
+	if err != nil {
+		return "", err
+	}
+
+	pdfReader, err := pdf.NewReader(file, stat.Size())
+	if err != nil {
+		return "", err
+	}
+
+	var text strings.Builder
+	numPages := pdfReader.NumPage()
+
+	for pageNum := 1; pageNum <= numPages; pageNum++ {
+		page := pdfReader.Page(pageNum)
+		if page.V.IsNull() {
+			continue
+		}
+
+		pageText, err := page.GetPlainText(nil)
+		if err != nil {
+			continue // Skip pages with errors
+		}
+
+		text.WriteString(pageText)
+		text.WriteString("\n\n")
+	}
+
+	return text.String(), nil
+}
+
+// extractPlainText extracts text from plain text file
+func (s *DocumentUploadService) extractPlainText(filePath string) (string, error) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
+// extractCSVText extracts text from CSV file
+func (s *DocumentUploadService) extractCSVText(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return "", err
+	}
+
+	// Convert CSV to formatted text
+	var builder strings.Builder
+
+	for i, record := range records {
+		if i == 0 {
+			builder.WriteString("COLUMNS: ")
+		}
+		builder.WriteString(strings.Join(record, " | "))
+		builder.WriteString("\n")
+	}
+
+	return builder.String(), nil
+}
+
+// extractWordText extracts text from Word document
+func (s *DocumentUploadService) extractWordText(filePath string) (string, error) {
+	// For now, use the existing extractTextFromDOCX method
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	return s.extractTextFromDOCX(file)
 }

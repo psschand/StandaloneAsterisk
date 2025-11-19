@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import { getModulesForRole, getQuickAccessItems } from '../../config/modules';
+import AgentStatusWidget from '../agent/AgentStatusWidget';
 
 export default function ModularDashboardLayout() {
   const location = useLocation();
@@ -230,6 +231,9 @@ export default function ModularDashboardLayout() {
             </div>
 
             <div className="flex items-center space-x-4">
+              {/* Agent Status Widget */}
+              <AgentStatusWidget />
+              
               <div className="hidden sm:block text-sm text-gray-600">
                 <span className="text-gray-400">Welcome,</span>{' '}
                 <span className="font-medium text-gray-900">{user?.first_name}</span>
@@ -246,6 +250,21 @@ export default function ModularDashboardLayout() {
         {/* Page content */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-auto bg-gray-50">
           <Outlet />
+          
+          {/* Footer */}
+          <footer className="mt-12 pt-8 border-t border-gray-200">
+            <div className="flex flex-wrap gap-6 justify-between items-center text-sm text-gray-600">
+              <div className="flex gap-6">
+                <Link to="/about" className="hover:text-blue-600">About</Link>
+                <Link to="/privacy-policy" className="hover:text-blue-600">Privacy</Link>
+                <Link to="/terms-of-service" className="hover:text-blue-600">Terms</Link>
+                <Link to="/contact" className="hover:text-blue-600">Contact</Link>
+              </div>
+              <div className="text-gray-500">
+                © 2024 Soham Technologies. All rights reserved.
+              </div>
+            </div>
+          </footer>
         </main>
 
         {/* Mobile bottom navigation */}

@@ -18,6 +18,7 @@ type ChatService interface {
 	CreateWidget(ctx context.Context, tenantID string, req *dto.CreateChatWidgetRequest) (*dto.ChatWidgetResponse, error)
 	GetWidget(ctx context.Context, id int64) (*dto.ChatWidgetResponse, error)
 	GetWidgetByKey(ctx context.Context, widgetKey string) (*dto.ChatWidgetResponse, error)
+	ListWidgets(ctx context.Context, tenantID string) ([]*dto.ChatWidgetResponse, error)
 	UpdateWidget(ctx context.Context, id int64, req *dto.UpdateChatWidgetRequest) (*dto.ChatWidgetResponse, error)
 	DeleteWidget(ctx context.Context, id int64) error
 
@@ -27,6 +28,7 @@ type ChatService interface {
 	GetSessionByKey(ctx context.Context, sessionKey string) (*dto.ChatSessionResponse, error)
 	GetSessionsByTenant(ctx context.Context, tenantID string, page, pageSize int) ([]dto.ChatSessionResponse, int64, error)
 	GetActiveSessions(ctx context.Context, tenantID string) ([]dto.ChatSessionResponse, error)
+	UpdateSessionStatus(ctx context.Context, sessionID int64, status common.ChatSessionStatus) error
 	AssignSession(ctx context.Context, sessionID, agentID int64) error
 	UnassignSession(ctx context.Context, sessionID int64) error
 	EndSession(ctx context.Context, sessionID int64, rating *int) error
@@ -138,6 +140,21 @@ func (s *chatService) GetWidgetByKey(ctx context.Context, widgetKey string) (*dt
 	}
 
 	return s.toWidgetResponse(widget), nil
+}
+
+// ListWidgets lists all widgets for a tenant
+func (s *chatService) ListWidgets(ctx context.Context, tenantID string) ([]*dto.ChatWidgetResponse, error) {
+	widgets, err := s.widgetRepo.FindByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	responses := make([]*dto.ChatWidgetResponse, len(widgets))
+	for i := range widgets {
+		responses[i] = s.toWidgetResponse(&widgets[i])
+	}
+
+	return responses, nil
 }
 
 // UpdateWidget updates a widget
@@ -344,8 +361,8 @@ func (s *chatService) CreateSession(ctx context.Context, req *dto.CreateChatSess
 		SessionKey:   s.generateSessionKey(),
 		VisitorName:  req.VisitorName,
 		VisitorEmail: req.VisitorEmail,
-		Status:       common.ChatSessionStatusQueued,
-		QueuedAt:     &now,
+		Status:       common.ChatSessionStatusActive,
+		QueuedAt:     nil, // Not queued initially - starts active with AI
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
@@ -354,12 +371,11 @@ func (s *chatService) CreateSession(ctx context.Context, req *dto.CreateChatSess
 		return nil, errors.Wrap(err, "failed to create session")
 	}
 
-	// Try to assign to available agent
-	agents, _ := s.agentRepo.FindAvailable(ctx, widget.TenantID)
-	if len(agents) > 0 {
-		// Assign to agent with least current chats
-		s.AssignSession(ctx, session.ID, agents[0].ID)
-	}
+	// DON'T auto-assign to agent - let AI handle the conversation first
+	// Agent assignment should only happen when:
+	// 1. AI explicitly requests handover (action='handoff')
+	// 2. User explicitly requests human agent
+	// 3. Routing mode is set to agent-first
 
 	return s.toSessionResponse(session), nil
 }
@@ -412,6 +428,25 @@ func (s *chatService) GetActiveSessions(ctx context.Context, tenantID string) ([
 	}
 
 	return responses, nil
+}
+
+// UpdateSessionStatus updates the status of a chat session
+func (s *chatService) UpdateSessionStatus(ctx context.Context, sessionID int64, status common.ChatSessionStatus) error {
+	// Get session
+	session, err := s.sessionRepo.FindByID(ctx, sessionID)
+	if err != nil {
+		return errors.NewNotFound("session not found")
+	}
+
+	// Update status
+	session.Status = status
+	session.UpdatedAt = time.Now()
+
+	if err := s.sessionRepo.Update(ctx, session); err != nil {
+		return errors.Wrap(err, "failed to update session status")
+	}
+
+	return nil
 }
 
 // AssignSession assigns a session to an agent

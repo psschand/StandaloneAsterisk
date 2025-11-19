@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import apiClient from '../../lib/api';
 import config from '../../config';
+import { useAuthStore } from '../../store/authStore';
 import type { User, UserRole, Tenant } from '../../types';
 
 interface UserFormProps {
@@ -11,17 +12,30 @@ interface UserFormProps {
 }
 
 export default function UserForm({ user, onClose, onSave }: UserFormProps) {
+  const currentUser = useAuthStore((state) => state.user);
+  const currentUserRole = currentUser?.role || currentUser?.roles?.[0]?.role;
+  const currentUserTenantId = currentUser?.tenant_id || currentUser?.roles?.[0]?.tenant_id || '';
+  const isSuperAdmin = currentUserRole === 'superadmin';
+
   const [formData, setFormData] = useState({
     email: user?.email || '',
     first_name: user?.first_name || '',
     last_name: user?.last_name || '',
     phone: user?.phone || '',
-    role: (user?.role || 'agent') as UserRole,
-    tenant_id: user?.tenant_id || '',
+    role: (user?.role || user?.roles?.[0]?.role || 'agent') as UserRole,
+    tenant_id: user?.tenant_id || user?.roles?.[0]?.tenant_id || currentUserTenantId,
+    extension: user?.roles?.[0]?.endpoint_id || '',
     status: user?.status || 'active',
     password: '',
     confirm_password: '',
   });
+
+  // Auto-set tenant for non-superadmin users
+  useEffect(() => {
+    if (!isSuperAdmin && !formData.tenant_id && currentUserTenantId) {
+      setFormData(prev => ({ ...prev, tenant_id: currentUserTenantId }));
+    }
+  }, [isSuperAdmin, currentUserTenantId, formData.tenant_id]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -33,6 +47,33 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
       const response = await apiClient.get(config.api.tenants.list);
       return response.data.data || [];
     },
+  });
+
+  // Fetch selected tenant details (including extension range)
+  const { data: selectedTenant } = useQuery({
+    queryKey: ['tenant', formData.tenant_id],
+    queryFn: async () => {
+      if (!formData.tenant_id) return null;
+      const response = await apiClient.get(`/api/v1/tenants/${formData.tenant_id}`);
+      return response.data.data;
+    },
+    enabled: !!formData.tenant_id,
+  });
+
+  // Fetch extensions for selection
+  const { data: extensions = [] } = useQuery<Array<{ id: string; display_name: string }>>({
+    queryKey: ['extensions'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/v1/extensions');
+      return response.data.data || [];
+    },
+  });
+
+  // Filter extensions by tenant range
+  const filteredExtensions = extensions.filter((ext) => {
+    if (!selectedTenant) return true;
+    const extNum = parseInt(ext.id);
+    return extNum >= selectedTenant.extension_range_start && extNum <= selectedTenant.extension_range_end;
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -65,6 +106,7 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
         phone: formData.phone,
         role: formData.role,
         tenant_id: formData.tenant_id,
+        extension: formData.extension || null,
         status: formData.status,
       };
 
@@ -175,8 +217,8 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
                   <option value="agent">Agent</option>
                   <option value="supervisor">Supervisor</option>
                   <option value="manager">Manager</option>
-                  <option value="tenant_admin">Tenant Admin</option>
-                  <option value="superadmin">Superadmin</option>
+                  {isSuperAdmin && <option value="tenant_admin">Tenant Admin</option>}
+                  {isSuperAdmin && <option value="superadmin">Superadmin</option>}
                   <option value="viewer">Viewer</option>
                 </select>
                 <p className="mt-1 text-xs text-gray-500">
@@ -193,22 +235,62 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Tenant *
                 </label>
+                {isSuperAdmin ? (
+                  <select
+                    required
+                    value={formData.tenant_id}
+                    onChange={(e) => setFormData({ ...formData, tenant_id: e.target.value })}
+                    className="input"
+                  >
+                    <option value="">Select Tenant</option>
+                    {tenants.map((tenant) => (
+                      <option key={tenant.id} value={tenant.id}>
+                        {tenant.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={tenants.find(t => t.id === formData.tenant_id)?.name || formData.tenant_id}
+                    disabled
+                    className="input bg-gray-100 cursor-not-allowed"
+                  />
+                )}
+                <p className="mt-1 text-xs text-gray-500">
+                  {isSuperAdmin ? 'Select the tenant for this user' : 'Tenant is auto-assigned based on your access'}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Extension (Optional)
+                </label>
                 <select
-                  required
-                  value={formData.tenant_id}
-                  onChange={(e) => setFormData({ ...formData, tenant_id: e.target.value })}
+                  value={formData.extension}
+                  onChange={(e) => setFormData({ ...formData, extension: e.target.value })}
                   className="input"
+                  disabled={!formData.tenant_id}
                 >
-                  <option value="">Select Tenant</option>
-                  {tenants.map((tenant) => (
-                    <option key={tenant.id} value={tenant.id}>
-                      {tenant.name}
+                  <option value="">No Extension</option>
+                  {filteredExtensions.map((ext) => (
+                    <option key={ext.id} value={ext.id}>
+                      {ext.id} - {ext.display_name || 'No Name'}
                     </option>
                   ))}
                 </select>
-                <p className="mt-1 text-xs text-gray-500">
-                  Use 'system' tenant for superadmins
-                </p>
+                {selectedTenant ? (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Your tenant range: {selectedTenant.extension_range_start}-{selectedTenant.extension_range_end} 
+                    {filteredExtensions.length === 0 && (
+                      <span className="text-orange-600"> (No extensions in range - create one first)</span>
+                    )}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Select a tenant first to see available extensions
+                  </p>
+                )}
               </div>
 
               <div>

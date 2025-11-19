@@ -29,8 +29,35 @@ func NewQueueRepository(db *gorm.DB) QueueRepository {
 	return &queueRepository{db: db}
 }
 
+func (r *queueRepository) ensureSchema(ctx context.Context) error {
+	migrator := r.db.WithContext(ctx).Migrator()
+
+	if !migrator.HasColumn(&asterisk.Queue{}, "MaxLen") {
+		if err := migrator.AddColumn(&asterisk.Queue{}, "MaxLen"); err != nil {
+			return err
+		}
+	}
+
+	if !migrator.HasColumn(&asterisk.Queue{}, "AnnounceHoldTime") {
+		if err := migrator.AddColumn(&asterisk.Queue{}, "AnnounceHoldTime"); err != nil {
+			return err
+		}
+	}
+
+	if !migrator.HasColumn(&asterisk.Queue{}, "Metadata") {
+		if err := migrator.AddColumn(&asterisk.Queue{}, "Metadata"); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // Create creates a new queue
 func (r *queueRepository) Create(ctx context.Context, queue *asterisk.Queue) error {
+	if err := r.ensureSchema(ctx); err != nil {
+		return err
+	}
 	return r.db.WithContext(ctx).Create(queue).Error
 }
 
@@ -80,6 +107,9 @@ func (r *queueRepository) FindByTenant(ctx context.Context, tenantID string, pag
 
 // Update updates a queue
 func (r *queueRepository) Update(ctx context.Context, queue *asterisk.Queue) error {
+	if err := r.ensureSchema(ctx); err != nil {
+		return err
+	}
 	return r.db.WithContext(ctx).Save(queue).Error
 }
 

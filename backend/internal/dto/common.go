@@ -15,7 +15,7 @@ import (
 type LoginRequest struct {
 	Email    string `json:"email" binding:"required,email" example:"john.doe@example.com"`
 	Password string `json:"password" binding:"required,min=8" example:"password123"`
-	TenantID string `json:"tenant_id,omitempty" example:"acme-corp"`
+	TenantID string `json:"tenantId" binding:"omitempty" example:"acme-corp"` // Changed to tenantId for frontend compatibility
 }
 
 // LoginResponse represents successful login response
@@ -85,6 +85,9 @@ type UpdateUserRequest struct {
 	Avatar    *string `json:"avatar,omitempty"`
 	Timezone  *string `json:"timezone,omitempty" example:"America/New_York"`
 	Language  *string `json:"language,omitempty" example:"en"`
+	Role      *string `json:"role,omitempty" example:"agent"`
+	Extension *string `json:"extension,omitempty" example:"agent100"`
+	Status    *string `json:"status,omitempty" example:"active"`
 }
 
 // CreateUserRequest represents user creation data
@@ -95,6 +98,9 @@ type CreateUserRequest struct {
 	FirstName string  `json:"first_name" binding:"required" example:"John"`
 	LastName  string  `json:"last_name" binding:"required" example:"Doe"`
 	Phone     *string `json:"phone,omitempty" example:"+1234567890"`
+	Role      *string `json:"role,omitempty" example:"agent"`
+	Extension *string `json:"extension,omitempty" example:"agent100"`
+	Status    *string `json:"status,omitempty" example:"active"`
 }
 
 // ChangePasswordRequest represents password change data
@@ -111,49 +117,55 @@ type ChangePasswordRequest struct {
 // TenantResponse represents tenant data
 // @Description Tenant information
 type TenantResponse struct {
-	ID                 string                `json:"id" example:"acme-corp"`
-	Name               string                `json:"name" example:"Acme Corporation"`
-	Domain             *string               `json:"domain,omitempty" example:"acme.example.com"`
-	Status             common.TenantStatus   `json:"status" example:"active"`
-	MaxAgents          int                   `json:"max_agents" example:"50"`
-	MaxDIDs            int                   `json:"max_dids" example:"20"`
-	MaxConcurrentCalls int                   `json:"max_concurrent_calls" example:"25"`
-	Features           common.TenantFeatures `json:"features"`
-	Settings           common.TenantSettings `json:"settings"`
-	CreatedAt          time.Time             `json:"created_at"`
-	UpdatedAt          time.Time             `json:"updated_at"`
+	ID                  string                `json:"id" example:"acme-corp"`
+	Name                string                `json:"name" example:"Acme Corporation"`
+	Domain              *string               `json:"domain,omitempty" example:"acme.example.com"`
+	Status              common.TenantStatus   `json:"status" example:"active"`
+	MaxAgents           int                   `json:"max_agents" example:"50"`
+	MaxDIDs             int                   `json:"max_dids" example:"20"`
+	MaxConcurrentCalls  int                   `json:"max_concurrent_calls" example:"25"`
+	ExtensionRangeStart int                   `json:"extension_range_start" example:"1000"`
+	ExtensionRangeEnd   int                   `json:"extension_range_end" example:"1999"`
+	Features            common.TenantFeatures `json:"features"`
+	Settings            common.TenantSettings `json:"settings"`
+	CreatedAt           time.Time             `json:"created_at"`
+	UpdatedAt           time.Time             `json:"updated_at"`
 }
 
 // CreateTenantRequest represents tenant creation data
 // @Description Create new tenant
 type CreateTenantRequest struct {
-	ID                 string                `json:"id" binding:"required" example:"acme-corp"`
-	Name               string                `json:"name" binding:"required" example:"Acme Corporation"`
-	Domain             *string               `json:"domain,omitempty" example:"acme.example.com"`
-	MaxAgents          int                   `json:"max_agents" example:"50"`
-	MaxDIDs            int                   `json:"max_dids" example:"20"`
-	MaxConcurrentCalls int                   `json:"max_concurrent_calls" example:"25"`
-	Features           common.TenantFeatures `json:"features"`
-	Settings           common.TenantSettings `json:"settings"`
-	BillingEmail       *string               `json:"billing_email,omitempty" example:"billing@acme.com"`
-	ContactName        *string               `json:"contact_name,omitempty" example:"John Doe"`
-	ContactPhone       *string               `json:"contact_phone,omitempty" example:"+1234567890"`
+	ID                  string                `json:"id" binding:"required" example:"acme-corp"`
+	Name                string                `json:"name" binding:"required" example:"Acme Corporation"`
+	Domain              *string               `json:"domain,omitempty" example:"acme.example.com"`
+	MaxAgents           int                   `json:"max_agents" example:"50"`
+	MaxDIDs             int                   `json:"max_dids" example:"20"`
+	MaxConcurrentCalls  int                   `json:"max_concurrent_calls" example:"25"`
+	ExtensionRangeStart *int                  `json:"extension_range_start,omitempty" example:"1000"`
+	ExtensionRangeEnd   *int                  `json:"extension_range_end,omitempty" example:"1999"`
+	Features            common.TenantFeatures `json:"features"`
+	Settings            common.TenantSettings `json:"settings"`
+	BillingEmail        *string               `json:"billing_email,omitempty" example:"billing@acme.com"`
+	ContactName         *string               `json:"contact_name,omitempty" example:"John Doe"`
+	ContactPhone        *string               `json:"contact_phone,omitempty" example:"+1234567890"`
 }
 
 // UpdateTenantRequest represents tenant update data
 // @Description Update tenant information
 type UpdateTenantRequest struct {
-	Name               *string                `json:"name,omitempty" example:"Acme Corporation"`
-	Domain             *string                `json:"domain,omitempty" example:"acme.example.com"`
-	Status             *common.TenantStatus   `json:"status,omitempty" example:"active"`
-	MaxAgents          *int                   `json:"max_agents,omitempty" example:"50"`
-	MaxDIDs            *int                   `json:"max_dids,omitempty" example:"20"`
-	MaxConcurrentCalls *int                   `json:"max_concurrent_calls,omitempty" example:"25"`
-	Features           *common.TenantFeatures `json:"features,omitempty"`
-	Settings           *common.TenantSettings `json:"settings,omitempty"`
-	BillingEmail       *string                `json:"billing_email,omitempty" example:"billing@acme.com"`
-	ContactName        *string                `json:"contact_name,omitempty" example:"John Doe"`
-	ContactPhone       *string                `json:"contact_phone,omitempty" example:"+1234567890"`
+	Name                *string                `json:"name,omitempty" example:"Acme Corporation"`
+	Domain              *string                `json:"domain,omitempty" example:"acme.example.com"`
+	Status              *common.TenantStatus   `json:"status,omitempty" example:"active"`
+	MaxAgents           *int                   `json:"max_agents,omitempty" example:"50"`
+	MaxDIDs             *int                   `json:"max_dids,omitempty" example:"20"`
+	MaxConcurrentCalls  *int                   `json:"max_concurrent_calls,omitempty" example:"25"`
+	ExtensionRangeStart *int                   `json:"extension_range_start,omitempty" example:"1000"`
+	ExtensionRangeEnd   *int                   `json:"extension_range_end,omitempty" example:"1999"`
+	Features            *common.TenantFeatures `json:"features,omitempty"`
+	Settings            *common.TenantSettings `json:"settings,omitempty"`
+	BillingEmail        *string                `json:"billing_email,omitempty" example:"billing@acme.com"`
+	ContactName         *string                `json:"contact_name,omitempty" example:"John Doe"`
+	ContactPhone        *string                `json:"contact_phone,omitempty" example:"+1234567890"`
 }
 
 // TenantResourceUsage represents tenant resource usage

@@ -17,6 +17,7 @@ type TenantRepository interface {
 	FindByDomain(ctx context.Context, domain string) (*core.Tenant, error)
 	FindActiveTrials(ctx context.Context) ([]core.Tenant, error)
 	CountResourcesByTenant(ctx context.Context, tenantID string) (map[string]int, error)
+	GetMaxExtensionRangeEnd(ctx context.Context) (int, error)
 }
 
 // tenantRepository implements TenantRepository
@@ -98,9 +99,9 @@ func (r *tenantRepository) FindActiveTrials(ctx context.Context) ([]core.Tenant,
 func (r *tenantRepository) CountResourcesByTenant(ctx context.Context, tenantID string) (map[string]int, error) {
 	counts := make(map[string]int)
 
-	// Count users
+	// Count users via user_roles
 	var userCount int64
-	if err := r.db.WithContext(ctx).Model(&core.User{}).Where("tenant_id = ?", tenantID).Count(&userCount).Error; err != nil {
+	if err := r.db.WithContext(ctx).Table("user_roles").Where("tenant_id = ?", tenantID).Distinct("user_id").Count(&userCount).Error; err != nil {
 		return nil, err
 	}
 	counts["users"] = int(userCount)
@@ -120,4 +121,19 @@ func (r *tenantRepository) CountResourcesByTenant(ctx context.Context, tenantID 
 	counts["queues"] = int(queueCount)
 
 	return counts, nil
+}
+
+// GetMaxExtensionRangeEnd returns the maximum extension_range_end value across all tenants
+func (r *tenantRepository) GetMaxExtensionRangeEnd(ctx context.Context) (int, error) {
+	var maxEnd int
+	err := r.db.WithContext(ctx).
+		Model(&core.Tenant{}).
+		Select("COALESCE(MAX(extension_range_end), 999)").
+		Scan(&maxEnd).Error
+
+	if err != nil {
+		return 0, err
+	}
+
+	return maxEnd, nil
 }

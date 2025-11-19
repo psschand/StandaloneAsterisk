@@ -77,6 +77,7 @@ type KnowledgeBase struct {
 	Question        string     `json:"question" gorm:"type:text;not null"`
 	Answer          string     `json:"answer" gorm:"type:text;not null"`
 	Keywords        string     `json:"keywords" gorm:"type:text"`
+	Tags            string     `json:"tags" gorm:"type:json"` // NEW: JSON array of tags for filtering
 	Embedding       string     `json:"embedding" gorm:"type:json"`
 	Language        string     `json:"language" gorm:"type:varchar(10);default:'en'"`
 	SourceURL       string     `json:"source_url" gorm:"type:varchar(500)"`
@@ -95,6 +96,22 @@ type KnowledgeBase struct {
 
 func (KnowledgeBase) TableName() string {
 	return "knowledge_base"
+}
+
+// Website represents a tenant's web property
+type Website struct {
+	ID          int64     `json:"id" gorm:"primaryKey"`
+	TenantID    string    `json:"tenant_id" gorm:"type:varchar(36);not null;index:idx_tenant_active"`
+	Name        string    `json:"name" gorm:"type:varchar(100);not null"`
+	Domain      string    `json:"domain" gorm:"type:varchar(255)"`
+	Description string    `json:"description" gorm:"type:text"`
+	IsActive    bool      `json:"is_active" gorm:"default:true;index:idx_tenant_active"`
+	CreatedAt   time.Time `json:"created_at" gorm:"default:CURRENT_TIMESTAMP"`
+	UpdatedAt   time.Time `json:"updated_at" gorm:"default:CURRENT_TIMESTAMP"`
+}
+
+func (Website) TableName() string {
+	return "websites"
 }
 
 // HandoffRule represents a rule for transferring from bot to human
@@ -150,12 +167,17 @@ func (ChannelIntegration) TableName() string {
 	return "channel_integrations"
 }
 
-// AIAgentConfig represents AI agent configuration per tenant
+// AIAgentConfig represents AI agent configuration (now supports profiles per tenant)
 type AIAgentConfig struct {
 	ID                         int64     `json:"id" gorm:"primaryKey"`
-	TenantID                   string    `json:"tenant_id" gorm:"type:varchar(36);not null;uniqueIndex"`
+	TenantID                   string    `json:"tenant_id" gorm:"type:varchar(36);not null;index:idx_tenant_profile"`
+	ProfileName                string    `json:"profile_name" gorm:"type:varchar(100);not null;default:'Default Profile'"` // NEW: Profile name
+	Description                string    `json:"description" gorm:"type:text"`                                             // NEW: Profile description
+	WebsiteID                  *int64    `json:"website_id" gorm:"index:idx_website"`                                      // NEW: Link to website (optional)
+	IsDefault                  bool      `json:"is_default" gorm:"default:false;index:idx_tenant_profile"`                 // NEW: Default profile for tenant
+	KBTags                     string    `json:"kb_tags" gorm:"type:json"`                                                 // NEW: JSON array of tags to filter KB
 	IsEnabled                  bool      `json:"is_enabled" gorm:"default:true"`
-	Model                      string    `json:"model" gorm:"type:varchar(50);default:'gemini-pro'"`
+	Model                      string    `json:"model" gorm:"type:varchar(50);default:'gemini-2.0-flash'"`
 	APIKeyEncrypted            string    `json:"api_key_encrypted" gorm:"type:text"`
 	SystemPrompt               string    `json:"system_prompt" gorm:"type:text"`
 	Personality                string    `json:"personality" gorm:"type:varchar(50);default:'professional'"`
@@ -178,7 +200,7 @@ type AIAgentConfig struct {
 	SentimentAnalysisEnabled   bool      `json:"sentiment_analysis_enabled" gorm:"default:true"`
 	IntentDetectionEnabled     bool      `json:"intent_detection_enabled" gorm:"default:true"`
 	LanguageDetectionEnabled   bool      `json:"language_detection_enabled" gorm:"default:false"`
-	SupportedLanguages         string    `json:"supported_languages" gorm:"type:json"`
+	SupportedLanguages         *string   `json:"supported_languages,omitempty" gorm:"type:json;default:null"`
 	AnalyticsEnabled           bool      `json:"analytics_enabled" gorm:"default:true"`
 	CreatedAt                  time.Time `json:"created_at" gorm:"default:CURRENT_TIMESTAMP"`
 	UpdatedAt                  time.Time `json:"updated_at" gorm:"default:CURRENT_TIMESTAMP"`

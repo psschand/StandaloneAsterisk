@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
+import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import {
   Palette,
@@ -34,6 +35,9 @@ import {
   Crown,
   Target,
   Database,
+  ExternalLink,
+  FileText,
+  Upload,
 } from 'lucide-react';
 
 interface WidgetConfig {
@@ -154,11 +158,43 @@ interface KnowledgeBaseCategory {
   subcategories?: string[];
 }
 
+interface UploadedFile {
+  id: number;
+  title: string;
+  file_name: string;
+  file_original_name: string;
+  file_size: number;
+  file_type: string;
+  category: string;
+  language: string;
+  website_id: number | null;
+  is_active: boolean;
+  created_at: string;
+  text_length: number;
+}
+
+interface WidgetListItem {
+  id: number;
+  name: string;
+  website_id: number | null;
+}
+
+interface Website {
+  id: number;
+  name: string;
+}
+
 export default function ChatWidgetDesigner() {
   const { accessToken } = useAuthStore();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [widgets, setWidgets] = useState<WidgetListItem[]>([]);
+  const [websites, setWebsites] = useState<Map<number, Website>>(new Map());
+  const [selectedWidgetId, setSelectedWidgetId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'appearance' | 'form' | 'ai-agent' | 'marketing' | 'ux' | 'embed'>('appearance');
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseCategory[]>([]);
   const [loadingKBs, setLoadingKBs] = useState(false);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
   const [config, setConfig] = useState<WidgetConfig>({
     name: 'Default Widget',
     primary_color: '#4f46e5',
@@ -221,14 +257,70 @@ export default function ChatWidgetDesigner() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [showPreChatForm, setShowPreChatForm] = useState(true);
 
-  // Load existing widget config
+  // Load widgets list and set initial selection
   useEffect(() => {
-    loadWidget();
+    loadWidgetsList();
   }, []);
 
-  const loadWidget = async () => {
+  // Load widget when selection changes
+  useEffect(() => {
+    if (selectedWidgetId) {
+      loadWidget(selectedWidgetId);
+      setSearchParams({ id: selectedWidgetId.toString() });
+    }
+  }, [selectedWidgetId]);
+
+  // Check URL params on mount
+  useEffect(() => {
+    const widgetIdParam = searchParams.get('id');
+    if (widgetIdParam) {
+      setSelectedWidgetId(parseInt(widgetIdParam));
+    }
+  }, []);
+
+  const loadWidgetsList = async () => {
     try {
-      const response = await axios.get('/api/v1/chat/widgets/1', {
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001/api/v1';
+      
+      // Fetch widgets
+      const widgetsResponse = await axios.get(`${API_BASE}/chat/widgets`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      
+      // Fetch websites
+      const websitesResponse = await axios.get(`${API_BASE}/websites`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      
+      if (widgetsResponse.data.success) {
+        const widgetsList = widgetsResponse.data.data || [];
+        setWidgets(widgetsList);
+        
+        // Auto-select first widget or URL param widget
+        const widgetIdParam = searchParams.get('id');
+        if (widgetIdParam) {
+          setSelectedWidgetId(parseInt(widgetIdParam));
+        } else if (widgetsList.length > 0) {
+          setSelectedWidgetId(widgetsList[0].id);
+        }
+      }
+      
+      if (websitesResponse.data.success) {
+        const websiteMap = new Map();
+        (websitesResponse.data.data || []).forEach((site: Website) => {
+          websiteMap.set(site.id, site);
+        });
+        setWebsites(websiteMap);
+      }
+    } catch (error) {
+      console.error('Failed to load widgets list:', error);
+    }
+  };
+
+  const loadWidget = async (widgetId: number) => {
+    try {
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001/api/v1';
+      const response = await axios.get(`${API_BASE}/chat/widgets/${widgetId}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (response.data.success) {
@@ -238,21 +330,21 @@ export default function ChatWidgetDesigner() {
         if (typeof loadedData.pre_chat_fields === 'string') {
           try {
             loadedData.pre_chat_fields = JSON.parse(loadedData.pre_chat_fields);
-          } catch (e) {
+          } catch (_error) {
             loadedData.pre_chat_fields = [];
           }
         }
         if (typeof loadedData.quick_replies === 'string') {
           try {
             loadedData.quick_replies = JSON.parse(loadedData.quick_replies);
-          } catch (e) {
+          } catch (_error) {
             loadedData.quick_replies = [];
           }
         }
         if (typeof loadedData.showcase_products === 'string') {
           try {
             loadedData.showcase_products = JSON.parse(loadedData.showcase_products);
-          } catch (e) {
+          } catch (_error) {
             loadedData.showcase_products = [];
           }
         }
@@ -283,6 +375,24 @@ export default function ChatWidgetDesigner() {
     }
   };
 
+  const fetchUploadedFiles = async (websiteId: number | null) => {
+    setLoadingFiles(true);
+    try {
+      const params = websiteId ? `?website_id=${websiteId}` : '';
+      const response = await axios.get(`/api/v1/knowledge-base/files${params}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (response.data.success) {
+        setUploadedFiles(response.data.data || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch uploaded files:', error);
+      setUploadedFiles([]);
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
   // Load KBs when switching to AI Agent tab
   useEffect(() => {
     if (activeTab === 'ai-agent' && knowledgeBases.length === 0) {
@@ -290,9 +400,25 @@ export default function ChatWidgetDesigner() {
     }
   }, [activeTab]);
 
+  // Load uploaded files when selecting a widget or switching to AI Agent tab
+  useEffect(() => {
+    if (activeTab === 'ai-agent' && selectedWidgetId) {
+      const selectedWidget = widgets.find(w => w.id === selectedWidgetId);
+      if (selectedWidget) {
+        fetchUploadedFiles(selectedWidget.website_id);
+      }
+    }
+  }, [activeTab, selectedWidgetId, widgets]);
+
   const saveWidget = async () => {
+    if (!selectedWidgetId) {
+      alert('Please select a widget first');
+      return;
+    }
+    
     setSaving(true);
     try {
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001/api/v1';
       // Prepare payload - convert arrays to JSON strings for backend
       const payload = {
         ...config,
@@ -308,13 +434,15 @@ export default function ChatWidgetDesigner() {
           : config.showcase_products,
       };
       
-      const response = await axios.put('/api/v1/chat/widgets/1', payload, {
+      const response = await axios.put(`${API_BASE}/chat/widgets/${selectedWidgetId}`, payload, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (response.data.success) {
         alert('Widget configuration saved successfully!');
         // Reload to get the latest data
-        await loadWidget();
+        if (selectedWidgetId) {
+          await loadWidget(selectedWidgetId);
+        }
       }
     } catch (error) {
       console.error('Failed to save widget:', error);
@@ -418,14 +546,66 @@ export default function ChatWidgetDesigner() {
     { id: 'embed', name: 'Embed Code', icon: Code },
   ];
 
+  const getWidgetLabel = (widget: WidgetListItem) => {
+    if (widget.website_id) {
+      const website = websites.get(widget.website_id);
+      return website ? `${widget.name} (${website.name})` : widget.name;
+    }
+    return `${widget.name} (Shared)`;
+  };
+
   return (
     <div className="max-w-7xl mx-auto">
+      {/* Widget Selector */}
+      <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-4 flex-1">
+            <div className="flex items-center">
+              <MessageSquare className="w-5 h-5 text-blue-600 mr-2" />
+              <label className="text-sm font-medium text-blue-900">Select Widget to Edit:</label>
+            </div>
+            <select
+              value={selectedWidgetId || ''}
+              onChange={(e) => setSelectedWidgetId(Number(e.target.value))}
+              className="flex-1 max-w-md px-3 py-2 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="">-- Select a Widget --</option>
+              {widgets.map((widget) => (
+                <option key={widget.id} value={widget.id}>
+                  {getWidgetLabel(widget)}
+                </option>
+              ))}
+            </select>
+          </div>
+          {selectedWidgetId && (
+            <div className="text-sm text-blue-700 bg-blue-100 px-3 py-1 rounded-full">
+              Editing Widget ID: {selectedWidgetId}
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Chat Widget Designer</h1>
-          <p className="text-gray-600 mt-1">Customize your chat widget with advanced features</p>
+          <p className="text-gray-600 mt-1">
+            {selectedWidgetId 
+              ? `Customizing: ${widgets.find(w => w.id === selectedWidgetId)?.name || 'Widget'}`
+              : 'Select a widget to customize'
+            }
+          </p>
         </div>
         <div className="flex space-x-3">
+          <a
+            href="/widget-demo"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-md hover:shadow-lg"
+          >
+            <Eye className="w-4 h-4" />
+            <span>Test Widget Live</span>
+            <ExternalLink className="w-4 h-4" />
+          </a>
           <button
             onClick={() => setPreviewOpen(!previewOpen)}
             className="flex items-center space-x-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
@@ -1188,6 +1368,117 @@ export default function ChatWidgetDesigner() {
                         </div>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Uploaded Files for RAG */}
+                {config.enable_ai_agent && config.enable_rag && (
+                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 border border-blue-200">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="p-2 bg-blue-100 rounded-lg">
+                          <FileText className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div>
+                          <h4 className="font-semibold text-gray-900">Uploaded Files</h4>
+                          <p className="text-sm text-gray-600">Files available for this chat widget's RAG system</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const selectedWidget = widgets.find(w => w.id === selectedWidgetId);
+                          if (selectedWidget) {
+                            fetchUploadedFiles(selectedWidget.website_id);
+                          }
+                        }}
+                        className="text-xs text-blue-600 hover:text-blue-700 flex items-center space-x-1 px-3 py-1 border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors"
+                      >
+                        <Upload className="w-3 h-3" />
+                        <span>Refresh</span>
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {loadingFiles ? (
+                        <div className="p-4 text-center text-gray-500">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                          Loading files...
+                        </div>
+                      ) : uploadedFiles.length === 0 ? (
+                        <div className="p-4 text-center text-gray-500 bg-gray-50 rounded-lg border border-dashed border-gray-300">
+                          <FileText className="w-8 h-8 mx-auto mb-2 text-gray-400" />
+                          <p className="text-sm">No files uploaded yet</p>
+                          <p className="text-xs mt-1">Upload files in the Knowledge Base page to make them available for RAG</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <p className="text-xs text-gray-600 mb-2">
+                            {uploadedFiles.length} {uploadedFiles.length === 1 ? 'file' : 'files'} available
+                            {uploadedFiles.some(f => f.website_id === null) && (
+                              <span className="ml-2 text-purple-600">• Includes tenant-wide files</span>
+                            )}
+                          </p>
+                          {uploadedFiles.map((file) => (
+                            <div key={file.id} className="p-3 bg-white rounded-lg border border-gray-300 hover:border-blue-300 transition-colors">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <div className="flex items-center space-x-2">
+                                    <FileText className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-sm font-medium text-gray-900 truncate">
+                                        {file.title}
+                                      </div>
+                                      <div className="text-xs text-gray-500 space-x-2">
+                                        <span>{file.file_original_name}</span>
+                                        <span>•</span>
+                                        <span>{(file.file_size / 1024).toFixed(1)} KB</span>
+                                        {file.category && (
+                                          <>
+                                            <span>•</span>
+                                            <span className="text-purple-600">{file.category}</span>
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center space-x-2 mt-2">
+                                    {file.website_id === null ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                        Available to all websites
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                        Website-specific
+                                      </span>
+                                    )}
+                                    {file.is_active ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                        Active
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+                                        Inactive
+                                      </span>
+                                    )}
+                                    <span className="text-xs text-gray-400">
+                                      {file.text_length.toLocaleString()} chars extracted
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="mt-4 pt-4 border-t border-blue-200">
+                      <p className="text-xs text-gray-600">
+                        <strong>Note:</strong> These files are automatically included in the RAG system. 
+                        Files marked as "Available to all websites" are shared across all chat widgets, 
+                        while "Website-specific" files are only available to widgets on the same website.
+                      </p>
+                    </div>
                   </div>
                 )}
 

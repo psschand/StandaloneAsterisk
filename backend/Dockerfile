@@ -16,7 +16,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o main cmd/api/main.go
 # Runtime stage
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates tzdata
+# Install runtime dependencies
+RUN apk --no-cache add \
+	ca-certificates \
+	tzdata \
+	fail2ban \
+	python3 \
+	bash
 
 WORKDIR /app
 

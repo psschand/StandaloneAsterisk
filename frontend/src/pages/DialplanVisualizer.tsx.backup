@@ -1,0 +1,492 @@
+import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Download, RefreshCw, Phone, GitBranch, MessageSquare } from 'lucide-react';
+import apiClient from '../lib/api';
+
+interface FlowNode {
+  id: string;
+  type: 'did' | 'queue' | 'extension' | 'ivr' | 'webhook' | 'voicemail' | 'external';
+  label: string;
+  data: any;
+  connections: string[];
+}
+
+interface DID {
+  id: number;
+  number: string;
+  friendly_name?: string | null;
+  route_type: 'queue' | 'endpoint' | 'ivr' | 'webhook' | 'external' | 'voicemail' | '';
+  route_target?: string | null;
+}
+
+interface Queue {
+  id: number;
+  name: string;
+  display_name?: string;
+  strategy: string;
+}
+
+interface IVRMenu {
+  id: number;
+  name: string;
+  display_name: string;
+  options: Array<{
+    digit: string;
+    action_type: string;
+    action_target: string;
+  }>;
+}
+
+export default function DialplanVisualizer() {
+  const [flowNodes, setFlowNodes] = useState<FlowNode[]>([]);
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+
+  const { data: didsData, refetch: refetchDIDs } = useQuery({
+    queryKey: ['dids'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/v1/dids');
+      return response.data;
+    },
+  });
+
+  const { data: queuesData, refetch: refetchQueues } = useQuery({
+    queryKey: ['queues'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/v1/queues');
+      return response.data;
+    },
+  });
+
+  const { data: ivrsData, refetch: refetchIVRs } = useQuery({
+    queryKey: ['ivr-menus'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/v1/ivr-menus');
+      return response.data;
+    },
+  });
+
+  const { data: extensionsData, refetch: refetchExtensions } = useQuery({
+    queryKey: ['extensions'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/v1/extensions');
+      return response.data;
+    },
+  });
+
+  useEffect(() => {
+    if (didsData && queuesData) {
+      generateFlowNodes();
+    }
+  }, [didsData, queuesData, ivrsData, extensionsData]);
+
+  const generateFlowNodes = () => {
+    const nodes: FlowNode[] = [];
+    const dids = didsData?.data || [];
+    const queues = queuesData?.data || [];
+    const ivrs = ivrsData?.data || [];
+
+    // Create DID nodes
+    dids.forEach((did: DID) => {
+      const connections: string[] = [];
+      const target = did.route_target || '';
+      
+      if (did.route_type === 'queue' && target) {
+        connections.push(`queue-${target}`);
+      } else if (did.route_type === 'endpoint' && target) {
+        connections.push(`ext-${target}`);
+      } else if (did.route_type === 'ivr' && target) {
+        connections.push(`ivr-${target}`);
+      }
+
+      nodes.push({
+        id: `did-${did.id}`,
+        type: 'did',
+        label: did.number,
+        data: did,
+        connections,
+      });
+    });
+
+    // Create Queue nodes
+    queues.forEach((queue: Queue) => {
+      nodes.push({
+        id: `queue-${queue.name}`,
+        type: 'queue',
+        label: queue.display_name || queue.name,
+        data: queue,
+        connections: [], // Queues typically don't route further
+      });
+    });
+
+    // Create IVR nodes
+    ivrs.forEach((ivr: IVRMenu) => {
+      const connections: string[] = [];
+      
+      if (ivr.options) {
+        ivr.options.forEach(opt => {
+          if (opt.action_type === 'queue') {
+            connections.push(`queue-${opt.action_target}`);
+          } else if (opt.action_type === 'extension') {
+            connections.push(`ext-${opt.action_target}`);
+          } else if (opt.action_type === 'submenu') {
+            connections.push(`ivr-${opt.action_target}`);
+          }
+        });
+      }
+
+      nodes.push({
+        id: `ivr-${ivr.name}`,
+        type: 'ivr',
+        label: ivr.display_name || ivr.name,
+        data: ivr,
+        connections: Array.from(new Set(connections)),
+      });
+    });
+
+    setFlowNodes(nodes);
+  };
+
+  const handleRefresh = () => {
+    refetchDIDs();
+    refetchQueues();
+    refetchIVRs();
+    refetchExtensions();
+  };
+
+  const exportAsImage = () => {
+    // Simple export - in production, use html2canvas or similar
+    alert('Export functionality would use html2canvas or similar library to generate PNG/SVG');
+  };
+
+  const getNodeColor = (type: string) => {
+    switch (type) {
+      case 'did':
+        return 'bg-blue-100 border-blue-500 text-blue-900';
+      case 'queue':
+        return 'bg-green-100 border-green-500 text-green-900';
+      case 'ivr':
+        return 'bg-purple-100 border-purple-500 text-purple-900';
+      case 'extension':
+        return 'bg-yellow-100 border-yellow-500 text-yellow-900';
+      case 'webhook':
+        return 'bg-orange-100 border-orange-500 text-orange-900';
+      default:
+        return 'bg-gray-100 border-gray-500 text-gray-900';
+    }
+  };
+
+  const getNodeIcon = (type: string) => {
+    switch (type) {
+      case 'did':
+        return <Phone className="w-5 h-5" />;
+      case 'queue':
+        return <GitBranch className="w-5 h-5" />;
+      case 'ivr':
+        return <MessageSquare className="w-5 h-5" />;
+      default:
+        return <Phone className="w-5 h-5" />;
+    }
+  };
+
+  // Group nodes by type for better organization
+  const didNodes = flowNodes.filter(n => n.type === 'did');
+  const ivrNodes = flowNodes.filter(n => n.type === 'ivr');
+  const queueNodes = flowNodes.filter(n => n.type === 'queue');
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Dialplan Visualizer</h1>
+          <p className="text-gray-600 mt-1">Visual representation of your call routing configuration</p>
+        </div>
+        <div className="flex gap-3">
+          <button
+            onClick={handleRefresh}
+            className="btn bg-white border border-gray-300 hover:bg-gray-50 text-gray-700"
+          >
+            <RefreshCw className="w-5 h-5 mr-2" />
+            Refresh
+          </button>
+          <button
+            onClick={exportAsImage}
+            className="btn btn-primary"
+          >
+            <Download className="w-5 h-5 mr-2" />
+            Export Image
+          </button>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center">
+            <Phone className="h-8 w-8 text-blue-600" />
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">Total DIDs</p>
+              <p className="text-2xl font-bold text-gray-900">{didNodes.length}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center">
+            <MessageSquare className="h-8 w-8 text-purple-600" />
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">IVR Menus</p>
+              <p className="text-2xl font-bold text-gray-900">{ivrNodes.length}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center">
+            <GitBranch className="h-8 w-8 text-green-600" />
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">Queues</p>
+              <p className="text-2xl font-bold text-gray-900">{queueNodes.length}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center">
+            <GitBranch className="h-8 w-8 text-orange-600" />
+            <div className="ml-4">
+              <p className="text-sm font-medium text-gray-600">Total Routes</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {flowNodes.reduce((sum, node) => sum + node.connections.length, 0)}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">Legend</h3>
+        <div className="flex flex-wrap gap-4">
+          <div className="flex items-center">
+            <div className="w-4 h-4 rounded bg-blue-500 mr-2"></div>
+            <span className="text-sm text-gray-600">Inbound DID</span>
+          </div>
+          <div className="flex items-center">
+            <div className="w-4 h-4 rounded bg-purple-500 mr-2"></div>
+            <span className="text-sm text-gray-600">IVR Menu</span>
+          </div>
+          <div className="flex items-center">
+            <div className="w-4 h-4 rounded bg-green-500 mr-2"></div>
+            <span className="text-sm text-gray-600">Queue</span>
+          </div>
+          <div className="flex items-center">
+            <div className="w-4 h-4 rounded bg-yellow-500 mr-2"></div>
+            <span className="text-sm text-gray-600">Extension</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Flow Visualization */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-6">Call Flow Diagram</h3>
+        
+        <div className="space-y-8">
+          {/* DIDs Section */}
+          {didNodes.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium text-gray-600 mb-4 flex items-center">
+                <Phone className="w-4 h-4 mr-2" />
+                Inbound DIDs
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {didNodes.map((node) => {
+                  const did = node.data as DID;
+                  return (
+                    <div
+                      key={node.id}
+                      className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                        selectedNode === node.id
+                          ? 'ring-2 ring-blue-400 shadow-lg'
+                          : ''
+                      } ${getNodeColor(node.type)}`}
+                      onClick={() => setSelectedNode(node.id)}
+                    >
+                      <div className="flex items-center mb-2">
+                        {getNodeIcon(node.type)}
+                        <span className="ml-2 font-semibold">{node.label}</span>
+                      </div>
+                      <div className="text-xs mb-2">
+                        {did.friendly_name && (
+                          <div className="text-gray-600">{did.friendly_name}</div>
+                        )}
+                      </div>
+                      
+                      {node.connections.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-current border-opacity-20">
+                          <div className="text-xs font-medium mb-1">Routes to:</div>
+                          {node.connections.map((connId) => {
+                            const targetNode = flowNodes.find(n => n.id === connId);
+                            return targetNode ? (
+                              <div key={connId} className="text-xs flex items-center mt-1">
+                                <span className="mr-1">→</span>
+                                <span className="font-medium">{targetNode.label}</span>
+                                <span className="ml-1 text-opacity-70">
+                                  ({targetNode.type})
+                                </span>
+                              </div>
+                            ) : null;
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* IVR Section */}
+          {ivrNodes.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium text-gray-600 mb-4 flex items-center">
+                <MessageSquare className="w-4 h-4 mr-2" />
+                IVR Menus
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {ivrNodes.map((node) => {
+                  const ivr = node.data as IVRMenu;
+                  return (
+                    <div
+                      key={node.id}
+                      className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                        selectedNode === node.id
+                          ? 'ring-2 ring-purple-400 shadow-lg'
+                          : ''
+                      } ${getNodeColor(node.type)}`}
+                      onClick={() => setSelectedNode(node.id)}
+                    >
+                      <div className="flex items-center mb-2">
+                        {getNodeIcon(node.type)}
+                        <span className="ml-2 font-semibold">{node.label}</span>
+                      </div>
+                      
+                      {ivr.options && ivr.options.length > 0 && (
+                        <div className="mt-2 text-xs">
+                          <div className="font-medium mb-1">{ivr.options.length} options:</div>
+                          {ivr.options.slice(0, 3).map((opt, idx) => (
+                            <div key={idx} className="flex items-center">
+                              <span className="font-mono font-bold mr-1">{opt.digit}:</span>
+                              <span className="truncate">{opt.action_target}</span>
+                            </div>
+                          ))}
+                          {ivr.options.length > 3 && (
+                            <div className="text-opacity-70">+{ivr.options.length - 3} more</div>
+                          )}
+                        </div>
+                      )}
+
+                      {node.connections.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-current border-opacity-20">
+                          <div className="text-xs font-medium mb-1">Routes to:</div>
+                          {node.connections.map((connId) => {
+                            const targetNode = flowNodes.find(n => n.id === connId);
+                            return targetNode ? (
+                              <div key={connId} className="text-xs flex items-center mt-1">
+                                <span className="mr-1">→</span>
+                                <span className="font-medium">{targetNode.label}</span>
+                              </div>
+                            ) : null;
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Queues Section */}
+          {queueNodes.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium text-gray-600 mb-4 flex items-center">
+                <GitBranch className="w-4 h-4 mr-2" />
+                Call Queues
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {queueNodes.map((node) => {
+                  const queue = node.data as Queue;
+                  return (
+                    <div
+                      key={node.id}
+                      className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                        selectedNode === node.id
+                          ? 'ring-2 ring-green-400 shadow-lg'
+                          : ''
+                      } ${getNodeColor(node.type)}`}
+                      onClick={() => setSelectedNode(node.id)}
+                    >
+                      <div className="flex items-center mb-2">
+                        {getNodeIcon(node.type)}
+                        <span className="ml-2 font-semibold">{node.label}</span>
+                      </div>
+                      <div className="text-xs">
+                        <div className="text-gray-600">Strategy: {queue.strategy}</div>
+                        <div className="text-gray-600">Name: {queue.name}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {flowNodes.length === 0 && (
+            <div className="text-center py-12">
+              <GitBranch className="mx-auto h-12 w-12 text-gray-400" />
+              <h3 className="mt-2 text-sm font-medium text-gray-900">No routing configured</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Configure DIDs, IVRs, and queues to see your call flow.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Selected Node Details */}
+      {selectedNode && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Selected Node Details</h3>
+          {(() => {
+            const node = flowNodes.find(n => n.id === selectedNode);
+            if (!node) return null;
+
+            return (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <span className="text-sm font-medium text-gray-600">Type:</span>
+                    <span className="ml-2 text-sm text-gray-900 capitalize">{node.type}</span>
+                  </div>
+                  <div>
+                    <span className="text-sm font-medium text-gray-600">Label:</span>
+                    <span className="ml-2 text-sm text-gray-900">{node.label}</span>
+                  </div>
+                </div>
+                <div>
+                  <span className="text-sm font-medium text-gray-600">Connections:</span>
+                  <span className="ml-2 text-sm text-gray-900">
+                    {node.connections.length === 0 ? 'None' : `${node.connections.length} route(s)`}
+                  </span>
+                </div>
+                <pre className="bg-gray-50 p-3 rounded text-xs overflow-auto">
+                  {JSON.stringify(node.data, null, 2)}
+                </pre>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -296,11 +296,20 @@ func (h *KnowledgeBaseHandler) UploadDocument(c *gin.Context) {
 	language := c.DefaultPostForm("language", "en")
 	priority, _ := strconv.Atoi(c.DefaultPostForm("priority", "5"))
 
+	// Parse website_id (optional)
+	var websiteID *int64
+	if websiteIDStr := c.PostForm("website_id"); websiteIDStr != "" {
+		if id, err := strconv.ParseInt(websiteIDStr, 10, 64); err == nil {
+			websiteID = &id
+		}
+	}
+
 	req := &chat.UploadDocumentRequest{
-		TenantID: tenantID,
-		Category: category,
-		Language: language,
-		Priority: priority,
+		TenantID:  tenantID,
+		WebsiteID: websiteID,
+		Category:  category,
+		Language:  language,
+		Priority:  priority,
 	}
 
 	// Process document (this will be implemented in document service)
@@ -311,4 +320,25 @@ func (h *KnowledgeBaseHandler) UploadDocument(c *gin.Context) {
 	}
 
 	response.Success(c, result)
+}
+
+// ListUploadedFiles lists uploaded files filtered by website
+func (h *KnowledgeBaseHandler) ListUploadedFiles(c *gin.Context) {
+	tenantID := c.GetString("tenant_id")
+	websiteIDStr := c.Query("website_id")
+
+	var websiteID *int64
+	if websiteIDStr != "" && websiteIDStr != "null" {
+		if id, err := strconv.ParseInt(websiteIDStr, 10, 64); err == nil {
+			websiteID = &id
+		}
+	}
+
+	files, err := h.service.ListUploadedFiles(c.Request.Context(), tenantID, websiteID)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, files)
 }

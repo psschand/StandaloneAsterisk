@@ -8,18 +8,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/psschand/callcenter/internal/dto"
 	"github.com/psschand/callcenter/internal/service"
+	"github.com/psschand/callcenter/internal/websocket"
 	"github.com/psschand/callcenter/pkg/response"
 )
 
 // ChatHandler handles chat requests
 type ChatHandler struct {
 	chatService service.ChatService
+	wsHub       *websocket.Hub
 }
 
 // NewChatHandler creates a new chat handler
-func NewChatHandler(chatService service.ChatService) *ChatHandler {
+func NewChatHandler(chatService service.ChatService, wsHub *websocket.Hub) *ChatHandler {
 	return &ChatHandler{
 		chatService: chatService,
+		wsHub:       wsHub,
 	}
 }
 
@@ -40,6 +43,25 @@ func (h *ChatHandler) CreateWidget(c *gin.Context) {
 	}
 
 	response.Created(c, result)
+}
+
+// ListWidgets lists all chat widgets for a tenant
+func (h *ChatHandler) ListWidgets(c *gin.Context) {
+	tenantID := c.GetString("tenant_id")
+
+	widgets, err := h.chatService.ListWidgets(c.Request.Context(), tenantID)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	// Flatten each widget response
+	flattenedWidgets := make([]map[string]interface{}, len(widgets))
+	for i, widget := range widgets {
+		flattenedWidgets[i] = h.flattenWidgetResponse(widget)
+	}
+
+	response.Success(c, flattenedWidgets)
 }
 
 // GetWidget gets a chat widget
@@ -309,6 +331,27 @@ func (h *ChatHandler) SendMessage(c *gin.Context) {
 	if err != nil {
 		response.Error(c, err)
 		return
+	}
+
+	// Get session to get tenant_id for WebSocket broadcasting
+	session, err := h.chatService.GetSession(c.Request.Context(), sessionID)
+	if err == nil && session != nil {
+		// Broadcast message via WebSocket to all connected clients
+		payload := &websocket.ChatMessagePayload{
+			SessionID:  sessionID,
+			MessageID:  result.ID,
+			SenderID:   userID,
+			SenderType: senderType,
+			SenderName: senderName,
+			Body:       *req.Body,
+			Timestamp:  result.CreatedAt.Format(time.RFC3339),
+		}
+
+		// Broadcast with type "chat.message.new" so clients can receive it
+		if broadcastErr := h.wsHub.BroadcastChatMessageNew(session.TenantID, payload); broadcastErr != nil {
+			// Log error but don't fail the request
+			fmt.Printf("Failed to broadcast chat message: %v\n", broadcastErr)
+		}
 	}
 
 	response.Created(c, result)

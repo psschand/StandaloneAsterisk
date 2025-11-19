@@ -9,21 +9,25 @@ import (
 // Tenant represents a business/organization in the multi-tenant system
 // @Description Tenant information with resource limits and features
 type Tenant struct {
-	ID                 string                `gorm:"column:id;primaryKey;type:varchar(64)" json:"id" example:"acme-corp"`
-	Name               string                `gorm:"column:name;type:varchar(255);not null" json:"name" example:"Acme Corporation"`
-	Domain             *string               `gorm:"column:domain;type:varchar(255);uniqueIndex" json:"domain,omitempty" example:"acme.example.com"`
-	Status             common.TenantStatus   `gorm:"column:status;type:enum('active','suspended','trial','inactive');default:active;index" json:"status" example:"active"`
-	MaxAgents          int                   `gorm:"column:max_agents;default:10" json:"max_agents" example:"50"`
-	MaxDIDs            int                   `gorm:"column:max_dids;default:5" json:"max_dids" example:"20"`
-	MaxConcurrentCalls int                   `gorm:"column:max_concurrent_calls;default:10" json:"max_concurrent_calls" example:"25"`
-	Features           common.TenantFeatures `gorm:"column:features;type:json" json:"features"`
-	Settings           common.TenantSettings `gorm:"column:settings;type:json" json:"settings"`
-	BillingEmail       *string               `gorm:"column:billing_email;type:varchar(255)" json:"billing_email,omitempty" example:"billing@acme.com"`
-	ContactName        *string               `gorm:"column:contact_name;type:varchar(255)" json:"contact_name,omitempty" example:"John Doe"`
-	ContactPhone       *string               `gorm:"column:contact_phone;type:varchar(32)" json:"contact_phone,omitempty" example:"+1234567890"`
-	TrialExpiresAt     *time.Time            `gorm:"column:trial_expires_at" json:"trial_expires_at,omitempty"`
-	CreatedAt          time.Time             `gorm:"column:created_at;autoCreateTime" json:"created_at"`
-	UpdatedAt          time.Time             `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	ID                  string                `gorm:"column:id;primaryKey;type:varchar(64)" json:"id" example:"acme-corp"`
+	Name                string                `gorm:"column:name;type:varchar(255);not null" json:"name" example:"Acme Corporation"`
+	Domain              *string               `gorm:"column:domain;type:varchar(255);uniqueIndex" json:"domain,omitempty" example:"acme.example.com"`
+	DomainMode          string                `gorm:"column:domain_mode;type:enum('single','multiple');default:multiple" json:"domain_mode" example:"multiple"` // NEW: single or multiple websites
+	MaxWebsites         *int                  `gorm:"column:max_websites" json:"max_websites,omitempty" example:"10"`                                           // NEW: NULL = unlimited
+	Status              common.TenantStatus   `gorm:"column:status;type:enum('active','suspended','trial','inactive');default:active;index" json:"status" example:"active"`
+	MaxAgents           int                   `gorm:"column:max_agents;default:10" json:"max_agents" example:"50"`
+	MaxDIDs             int                   `gorm:"column:max_dids;default:5" json:"max_dids" example:"20"`
+	MaxConcurrentCalls  int                   `gorm:"column:max_concurrent_calls;default:10" json:"max_concurrent_calls" example:"25"`
+	ExtensionRangeStart int                   `gorm:"column:extension_range_start;default:1000" json:"extension_range_start" example:"1000"`
+	ExtensionRangeEnd   int                   `gorm:"column:extension_range_end;default:1999" json:"extension_range_end" example:"1999"`
+	Features            common.TenantFeatures `gorm:"column:features;type:json" json:"features"`
+	Settings            common.TenantSettings `gorm:"column:settings;type:json" json:"settings"`
+	BillingEmail        *string               `gorm:"column:billing_email;type:varchar(255)" json:"billing_email,omitempty" example:"billing@acme.com"`
+	ContactName         *string               `gorm:"column:contact_name;type:varchar(255)" json:"contact_name,omitempty" example:"John Doe"`
+	ContactPhone        *string               `gorm:"column:contact_phone;type:varchar(32)" json:"contact_phone,omitempty" example:"+1234567890"`
+	TrialExpiresAt      *time.Time            `gorm:"column:trial_expires_at" json:"trial_expires_at,omitempty"`
+	CreatedAt           time.Time             `gorm:"column:created_at;autoCreateTime" json:"created_at"`
+	UpdatedAt           time.Time             `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
 
 	// Relations (not stored in DB)
 	// Users []User        `gorm:"foreignKey:TenantID" json:"users,omitempty"` // Commented out - users don't have direct tenant_id

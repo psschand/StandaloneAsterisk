@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/psschand/callcenter/internal/common"
@@ -26,9 +28,10 @@ type UserService interface {
 }
 
 type userService struct {
-	userRepo   repository.UserRepository
-	roleRepo   repository.UserRoleRepository
-	tenantRepo repository.TenantRepository
+	userRepo     repository.UserRepository
+	roleRepo     repository.UserRoleRepository
+	tenantRepo   repository.TenantRepository
+	endpointRepo repository.PsEndpointRepository
 }
 
 // NewUserService creates a new user service
@@ -36,11 +39,13 @@ func NewUserService(
 	userRepo repository.UserRepository,
 	roleRepo repository.UserRoleRepository,
 	tenantRepo repository.TenantRepository,
+	endpointRepo repository.PsEndpointRepository,
 ) UserService {
 	return &userService{
-		userRepo:   userRepo,
-		roleRepo:   roleRepo,
-		tenantRepo: tenantRepo,
+		userRepo:     userRepo,
+		roleRepo:     roleRepo,
+		tenantRepo:   tenantRepo,
+		endpointRepo: endpointRepo,
 	}
 }
 
@@ -91,15 +96,34 @@ func (s *userService) Create(ctx context.Context, tenantID string, req *dto.Crea
 		UpdatedAt:    now,
 	}
 
+	// Set status if provided
+	if req.Status != nil {
+		user.Status = common.UserStatus(*req.Status)
+	}
+
 	if err := s.userRepo.Create(ctx, user); err != nil {
 		return nil, errors.Wrap(err, "failed to create user")
 	}
 
-	// Assign role (default to agent)
+	// Determine role (default to agent if not provided)
+	role := common.RoleAgent
+	if req.Role != nil {
+		role = common.UserRole(*req.Role)
+	}
+
+	// Validate extension if provided
+	if req.Extension != nil && *req.Extension != "" {
+		if err := s.validateExtension(ctx, tenant, *req.Extension); err != nil {
+			return nil, err
+		}
+	}
+
+	// Assign role with extension
 	userRole := &core.UserRole{
 		UserID:    user.ID,
 		TenantID:  tenantID,
-		Role:      "agent",
+		Role:      role,
+		Extension: req.Extension,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -119,7 +143,7 @@ func (s *userService) Create(ctx context.Context, tenantID string, req *dto.Crea
 		Avatar:        user.Avatar,
 		Timezone:      user.Timezone,
 		Language:      user.Language,
-		Roles:         []dto.UserRoleResponse{{TenantID: tenantID, Role: userRole.Role}},
+		Roles:         []dto.UserRoleResponse{{TenantID: tenantID, Role: userRole.Role, EndpointID: userRole.Extension}},
 		CreatedAt:     user.CreatedAt,
 		UpdatedAt:     user.UpdatedAt,
 	}, nil
@@ -136,8 +160,9 @@ func (s *userService) GetByID(ctx context.Context, id int64) (*dto.UserResponse,
 	roles := make([]dto.UserRoleResponse, len(user.Roles))
 	for i, role := range user.Roles {
 		roles[i] = dto.UserRoleResponse{
-			TenantID: role.TenantID,
-			Role:     role.Role,
+			TenantID:   role.TenantID,
+			Role:       role.Role,
+			EndpointID: role.Extension,
 		}
 	}
 
@@ -173,8 +198,9 @@ func (s *userService) GetByTenant(ctx context.Context, tenantID string, page, pa
 		var roles []dto.UserRoleResponse
 		if userRole != nil {
 			roles = []dto.UserRoleResponse{{
-				TenantID: userRole.TenantID,
-				Role:     userRole.Role,
+				TenantID:   userRole.TenantID,
+				Role:       userRole.Role,
+				EndpointID: userRole.Extension,
 			}}
 		}
 
@@ -225,6 +251,9 @@ func (s *userService) Update(ctx context.Context, id int64, req *dto.UpdateUserR
 	if req.Language != nil {
 		user.Language = req.Language
 	}
+	if req.Status != nil {
+		user.Status = common.UserStatus(*req.Status)
+	}
 
 	user.UpdatedAt = time.Now()
 
@@ -232,12 +261,41 @@ func (s *userService) Update(ctx context.Context, id int64, req *dto.UpdateUserR
 		return nil, errors.Wrap(err, "failed to update user")
 	}
 
+	// Update role and extension if provided (update first role only for now)
+	if (req.Role != nil || req.Extension != nil) && len(user.Roles) > 0 {
+		role := &user.Roles[0]
+
+		// Validate extension if being updated
+		if req.Extension != nil && *req.Extension != "" {
+			// Get tenant to validate extension range
+			tenant, err := s.tenantRepo.FindByID(ctx, role.TenantID)
+			if err != nil {
+				return nil, errors.NewNotFound("tenant not found")
+			}
+			if err := s.validateExtension(ctx, tenant, *req.Extension); err != nil {
+				return nil, err
+			}
+		}
+
+		if req.Role != nil {
+			role.Role = common.UserRole(*req.Role)
+		}
+		if req.Extension != nil {
+			role.Extension = req.Extension
+		}
+		role.UpdatedAt = time.Now()
+		if err := s.roleRepo.Update(ctx, role); err != nil {
+			return nil, errors.Wrap(err, "failed to update role")
+		}
+	}
+
 	// Convert UserRoles to UserRoleResponse
 	roles := make([]dto.UserRoleResponse, len(user.Roles))
 	for i, role := range user.Roles {
 		roles[i] = dto.UserRoleResponse{
-			TenantID: role.TenantID,
-			Role:     role.Role,
+			TenantID:   role.TenantID,
+			Role:       role.Role,
+			EndpointID: role.Extension,
 		}
 	}
 
@@ -297,8 +355,9 @@ func (s *userService) Search(ctx context.Context, tenantID, query string, page, 
 		var roles []dto.UserRoleResponse
 		if userRole != nil {
 			roles = []dto.UserRoleResponse{{
-				TenantID: userRole.TenantID,
-				Role:     userRole.Role,
+				TenantID:   userRole.TenantID,
+				Role:       userRole.Role,
+				EndpointID: userRole.Extension,
 			}}
 		}
 
@@ -382,6 +441,33 @@ func (s *userService) DeactivateUser(ctx context.Context, id int64) error {
 
 	if err := s.userRepo.Update(ctx, user); err != nil {
 		return errors.Wrap(err, "failed to deactivate user")
+	}
+
+	return nil
+}
+
+// validateExtension validates that the extension is numeric, within the tenant's range, and exists in ps_endpoints
+func (s *userService) validateExtension(ctx context.Context, tenant *core.Tenant, extension string) error {
+	// Validate extension is numeric
+	extNum, err := strconv.Atoi(extension)
+	if err != nil {
+		return errors.NewValidation("extension must be a numeric value")
+	}
+
+	// Validate extension is within tenant's allocated range
+	if extNum < tenant.ExtensionRangeStart || extNum > tenant.ExtensionRangeEnd {
+		return errors.NewValidation(
+			fmt.Sprintf("extension must be between %d and %d for your tenant",
+				tenant.ExtensionRangeStart, tenant.ExtensionRangeEnd),
+		)
+	}
+
+	// Validate extension exists in ps_endpoints table
+	endpoint, err := s.endpointRepo.FindByID(ctx, extension)
+	if err != nil || endpoint == nil {
+		return errors.NewValidation(
+			fmt.Sprintf("extension %s does not exist in the system. Please create the extension first.", extension),
+		)
 	}
 
 	return nil
