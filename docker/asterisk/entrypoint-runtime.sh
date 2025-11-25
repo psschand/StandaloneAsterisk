@@ -30,6 +30,12 @@ EOF
 
 export ODBCINI=/tmp/odbc_internal.ini
 
+# Substitute APP_DOMAIN in pjsip.conf if provided
+if [ -n "${APP_DOMAIN:-}" ] && [ -f /etc/asterisk/pjsip.conf ]; then
+  echo "Updating pjsip.conf external_signaling_address to ${APP_DOMAIN}..."
+  sed -i "s|external_signaling_address=.*|external_signaling_address=${APP_DOMAIN}|" /etc/asterisk/pjsip.conf
+fi
+
 # Ensure the safe ast_logescalator is executable
 if [ -f /var/lib/asterisk/scripts/ast_logescalator ]; then
   chmod +x /var/lib/asterisk/scripts/ast_logescalator || true

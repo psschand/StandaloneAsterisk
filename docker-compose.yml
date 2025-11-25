@@ -30,6 +30,7 @@ services:
       - EXT_100_USERNAME=${EXT_100_USERNAME}
       - EXT_100_PASSWORD=${EXT_100_PASSWORD}
       - EXT_100_CALLERID=${EXT_100_CALLERID}
+      - APP_DOMAIN=${APP_DOMAIN}
     networks:
       - call-center-network
     restart: unless-stopped

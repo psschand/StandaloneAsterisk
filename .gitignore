@@ -1,0 +1,8 @@
+
+# Android App Build Files
+android-app/
+*.keystore
+*.jks
+*.aab
+*.apk
+.well-known/assetlinks.json

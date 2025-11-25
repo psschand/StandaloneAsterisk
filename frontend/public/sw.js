@@ -1,6 +1,6 @@
 // Service Worker for PWA offline support
-const CACHE_NAME = 'callcenter-v2'; // Increment version to force cache refresh
-const API_CACHE_NAME = 'callcenter-api-v1';
+const CACHE_NAME = 'callcenter-v3'; // Increment version to force cache refresh
+const API_CACHE_NAME = 'callcenter-api-v2';
 
 // Resources to cache immediately
 const STATIC_CACHE_URLS = [

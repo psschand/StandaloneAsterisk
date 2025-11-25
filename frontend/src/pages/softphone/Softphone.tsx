@@ -91,6 +91,38 @@ export default function Softphone() {
     },
   });
 
+  // Fetch call history (CDRs) for current user
+  const { data: callHistoryData } = useQuery({
+    queryKey: ['cdr', 'my-calls'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/v1/cdr', {
+        params: {
+          page: 1,
+          page_size: 10,
+          sort: 'created_at',
+          order: 'desc'
+        }
+      });
+      return response.data;
+    },
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
+
+  // Transform CDR data to Call format for recent calls display
+  useEffect(() => {
+    if (callHistoryData?.data) {
+      const cdrs = callHistoryData.data.map((cdr: any) => ({
+        id: cdr.id.toString(),
+        number: cdr.direction === 'outbound' ? cdr.destination_number : cdr.source_number,
+        direction: cdr.direction,
+        status: cdr.disposition === 'ANSWERED' ? 'connected' : 'ringing',
+        startTime: new Date(cdr.start_time),
+        duration: cdr.duration,
+      }));
+      setRecentCalls(cdrs);
+    }
+  }, [callHistoryData]);
+
   // Initialize SIP.js
   useEffect(() => {
     if (!credentials) return;
@@ -596,10 +628,46 @@ export default function Softphone() {
 
   if (credentialsLoading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading softphone...</p>
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="text-center max-w-md mx-auto p-8">
+          <div className="relative">
+            <div className="animate-spin rounded-full h-16 w-16 border-4 border-gray-200 border-t-blue-600 mx-auto mb-6"></div>
+            <Phone className="w-8 h-8 text-blue-600 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2" />
+          </div>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Initializing Softphone</h2>
+          <p className="text-gray-600 mb-4">Setting up your WebRTC connection...</p>
+          <div className="space-y-2 text-sm text-gray-500">
+            <div className="flex items-center justify-center gap-2">
+              <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
+              <span>Loading credentials</span>
+            </div>
+            <div className="flex items-center justify-center gap-2">
+              <div className="w-2 h-2 bg-gray-300 rounded-full"></div>
+              <span>Connecting to SIP server</span>
+            </div>
+            <div className="flex items-center justify-center gap-2">
+              <div className="w-2 h-2 bg-gray-300 rounded-full"></div>
+              <span>Registering extension</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!credentials) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="text-center max-w-md mx-auto p-8">
+          <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Softphone Unavailable</h2>
+          <p className="text-gray-600 mb-4">Unable to load softphone credentials.</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );
@@ -1007,26 +1075,40 @@ export default function Softphone() {
             <div className="space-y-3">
               {callStatus === 'idle' ? (
                 <>
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setPhoneNumber('')}
+                      disabled={!phoneNumber}
+                      className="py-3 px-4 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 
+                               disabled:cursor-not-allowed rounded-lg font-medium text-gray-700 text-sm 
+                               flex items-center justify-center space-x-2 transition-colors"
+                    >
+                      <span className="text-xl">×</span>
+                      <span>Clear</span>
+                    </button>
                     <button
                       onClick={handleBackspace}
                       disabled={!phoneNumber}
-                      className="flex-1 py-2 px-3 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 
-                               disabled:cursor-not-allowed rounded-lg font-medium text-gray-700 text-sm transition-colors"
+                      className="py-3 px-4 bg-red-50 hover:bg-red-100 disabled:opacity-50 
+                               disabled:cursor-not-allowed rounded-lg font-medium text-red-700 text-sm 
+                               flex items-center justify-center space-x-2 transition-colors border border-red-200"
                     >
-                      ← Delete
-                    </button>
-                    <button
-                      onClick={handleCall}
-                      disabled={!phoneNumber || !isRegistered}
-                      className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-700 disabled:opacity-50 
-                               disabled:cursor-not-allowed rounded-lg font-medium text-white 
-                               flex items-center justify-center space-x-2 transition-colors"
-                    >
-                      <Phone className="w-4 h-4" />
-                      <span>Call</span>
+                      <span className="text-lg">⌫</span>
+                      <span>Delete</span>
                     </button>
                   </div>
+                  
+                  <button
+                    onClick={handleCall}
+                    disabled={!phoneNumber || !isRegistered}
+                    className="w-full py-4 px-4 bg-green-600 hover:bg-green-700 disabled:opacity-50 
+                             disabled:cursor-not-allowed rounded-lg font-semibold text-white text-lg
+                             flex items-center justify-center space-x-2 transition-colors shadow-md
+                             hover:shadow-lg active:scale-95"
+                  >
+                    <Phone className="w-5 h-5" />
+                    <span>Call</span>
+                  </button>
                   
                   {/* Echo Test Button */}
                   <button
@@ -1178,27 +1260,46 @@ export default function Softphone() {
         {/* Recent Calls */}
         <div className="lg:col-span-1">
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Calls</h2>
-            <div className="space-y-2">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">Recent Calls</h2>
+              {recentCalls.length > 0 && (
+                <span className="text-xs text-gray-500">{recentCalls.length} calls</span>
+              )}
+            </div>
+            <div className="space-y-2 max-h-[600px] overflow-y-auto">
               {recentCalls.length === 0 ? (
-                <p className="text-center text-gray-500 py-8">No recent calls</p>
+                <div className="text-center py-8">
+                  <Phone className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500 text-sm">No recent calls</p>
+                  <p className="text-gray-400 text-xs mt-1">Your call history will appear here</p>
+                </div>
               ) : (
                 recentCalls.map((call) => (
                   <div
                     key={call.id}
-                    onClick={() => setPhoneNumber(call.number)}
-                    className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg cursor-pointer transition-colors"
+                    className="flex items-center justify-between p-3 hover:bg-gray-50 rounded-lg border border-transparent hover:border-gray-200 transition-all group"
                   >
-                    <div className="flex items-center space-x-3">
-                      {call.direction === 'outbound' ? (
-                        <PhoneOutgoing className="w-4 h-4 text-green-600" />
-                      ) : (
-                        <PhoneIncoming className="w-4 h-4 text-blue-600" />
-                      )}
-                      <div>
+                    <div 
+                      onClick={() => setPhoneNumber(call.number)}
+                      className="flex items-center space-x-3 flex-1 cursor-pointer"
+                    >
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                        call.direction === 'outbound' ? 'bg-green-100' : 'bg-blue-100'
+                      }`}>
+                        {call.direction === 'outbound' ? (
+                          <PhoneOutgoing className="w-4 h-4 text-green-600" />
+                        ) : (
+                          <PhoneIncoming className="w-4 h-4 text-blue-600" />
+                        )}
+                      </div>
+                      <div className="flex-1">
                         <div className="font-medium text-gray-900">{call.number}</div>
-                        <div className="text-xs text-gray-500">
-                          {call.startTime?.toLocaleTimeString()}
+                        <div className="flex items-center gap-2 text-xs text-gray-500">
+                          <Clock className="w-3 h-3" />
+                          <span>{call.startTime?.toLocaleTimeString()}</span>
+                          {call.duration !== undefined && call.duration > 0 && (
+                            <span className="text-gray-400">• {Math.floor(call.duration / 60)}m {call.duration % 60}s</span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1206,9 +1307,11 @@ export default function Softphone() {
                       onClick={(e) => {
                         e.stopPropagation();
                         setPhoneNumber(call.number);
-                        handleCall();
+                        setTimeout(() => handleCall(), 100);
                       }}
-                      className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                      disabled={!isRegistered}
+                      className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Call this number"
                     >
                       <Phone className="w-4 h-4" />
                     </button>

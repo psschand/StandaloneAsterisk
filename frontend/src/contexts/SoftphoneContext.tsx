@@ -11,6 +11,7 @@ import {
 import type { Session } from 'sip.js';
 import apiClient from '../lib/api';
 import config from '../config';
+import { useAuthStore } from '../store/authStore';
 
 interface SIPCredentials {
   username: string;
@@ -62,6 +63,7 @@ interface Props {
 
 export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
   const location = useLocation();
+  const { isAuthenticated } = useAuthStore();
   const [isRegistered, setIsRegistered] = useState(false);
   const [callStatus, setCallStatus] = useState<CallStatus>('idle');
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -92,18 +94,38 @@ export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
     }
   }, [location.pathname, callStatus]);
 
-  // Fetch credentials
+  // Fetch credentials - only when authenticated
   useEffect(() => {
+    if (!isAuthenticated) {
+      return; // Don't fetch credentials if not logged in
+    }
+
     const fetchCredentials = async () => {
       try {
+        console.log('[Softphone] Fetching credentials from:', config.api.softphone.credentials);
         const response = await apiClient.get(config.api.softphone.credentials);
-        setCredentials(response.data.data);
-      } catch (error) {
-        console.error('Failed to fetch SIP credentials:', error);
+        console.log('[Softphone] Credentials response:', response.data);
+        
+        // Handle both direct data and wrapped response
+        const credData = response.data.data || response.data;
+        console.log('[Softphone] Setting credentials:', credData);
+        setCredentials(credData);
+      } catch (error: any) {
+        console.error('[Softphone] Failed to fetch SIP credentials:', error);
+        console.error('[Softphone] Error details:', {
+          message: error.message,
+          response: error.response?.data,
+          status: error.response?.status
+        });
+        
+        // Only show error on softphone page
+        if (location.pathname === '/softphone') {
+          alert(`Failed to load softphone: ${error.response?.data?.message || error.message || 'Unknown error'}`);
+        }
       }
     };
     fetchCredentials();
-  }, []);
+  }, [isAuthenticated, location.pathname]);
 
   // Initialize SIP.js - runs once with credentials
   useEffect(() => {
@@ -279,41 +301,70 @@ export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
     stopRingtone();
   };
 
-  const makeCall = (number: string) => {
+  const makeCall = async (number: string) => {
     if (!userAgentRef.current || !number) return;
 
-    const target = UserAgent.makeURI(`sip:${number}@${credentials?.domain}`);
-    if (!target) return;
+    try {
+      // Request microphone permission first
+      console.log('[Softphone] Requesting microphone permission...');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      console.log('[Softphone] Microphone permission granted');
+      
+      // Stop the test stream immediately
+      stream.getTracks().forEach(track => track.stop());
 
-    const inviter = new Inviter(userAgentRef.current, target, {
-      sessionDescriptionHandlerOptions: {
-        constraints: { audio: true, video: false }
-      },
-      extraHeaders: ['Session-Expires: 0']
-    });
-
-    sessionRef.current = inviter;
-    setPhoneNumber(number);
-    setCallStatus('ringing');
-
-    inviter.stateChange.addListener((state) => {
-      if (state === SessionState.Established) {
-        setCallStatus('connected');
-        const mediaStream = (inviter.sessionDescriptionHandler as any)?.peerConnection?.getRemoteStreams()[0];
-        if (mediaStream && remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = mediaStream;
-        }
-      } else if (state === SessionState.Terminated) {
-        setCallStatus('idle');
-        setPhoneNumber('');
-        setCallDuration(0);
-        setIsMuted(false);
-        setIsOnHold(false);
-        cleanupMedia();
+      const target = UserAgent.makeURI(`sip:${number}@${credentials?.domain}`);
+      if (!target) {
+        console.error('[Softphone] Failed to create SIP URI for number:', number);
+        alert('Invalid phone number');
+        return;
       }
-    });
 
-    inviter.invite();
+      console.log('[Softphone] Making call to:', number, 'URI:', target.toString());
+
+      const inviter = new Inviter(userAgentRef.current, target, {
+        sessionDescriptionHandlerOptions: {
+          constraints: { audio: true, video: false }
+        },
+        extraHeaders: ['Session-Expires: 0']
+      });
+
+      sessionRef.current = inviter;
+      setPhoneNumber(number);
+      setCallStatus('ringing');
+
+      inviter.stateChange.addListener((state) => {
+        console.log('[Softphone] Call state changed to:', state);
+        if (state === SessionState.Established) {
+          setCallStatus('connected');
+          const mediaStream = (inviter.sessionDescriptionHandler as any)?.peerConnection?.getRemoteStreams()[0];
+          if (mediaStream && remoteAudioRef.current) {
+            remoteAudioRef.current.srcObject = mediaStream;
+          }
+        } else if (state === SessionState.Terminated) {
+          setCallStatus('idle');
+          setPhoneNumber('');
+          setCallDuration(0);
+          setIsMuted(false);
+          setIsOnHold(false);
+          cleanupMedia();
+        }
+      });
+
+      inviter.invite().catch((error: Error) => {
+        console.error('[Softphone] Call failed:', error);
+        alert(`Call failed: ${error.message}`);
+        setCallStatus('idle');
+      });
+    } catch (error: any) {
+      console.error('[Softphone] Microphone permission denied or error:', error);
+      if (error.name === 'NotAllowedError') {
+        alert('Microphone permission denied. Please allow microphone access in your browser settings and try again.');
+      } else {
+        alert(`Call failed: ${error.message || 'Unknown error'}`);
+      }
+      setCallStatus('idle');
+    }
   };
 
   const hangup = () => {

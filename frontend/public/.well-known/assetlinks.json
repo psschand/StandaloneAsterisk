@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.soham.callcenter",
+    "sha256_cert_fingerprints": [
+      "2C:CD:49:BE:E8:9F:C7:F2:FC:FA:00:94:F8:DC:2D:F3:AD:9C:91:84:44:25:23:86:B0:34:09:11:A7:A8:D3:51"
+    ]
+  }
+}]
