@@ -58,6 +58,9 @@ interface Call {
 type CallStatus = 'idle' | 'ringing' | 'connected' | 'disconnecting';
 
 export default function Softphone() {
+  useEffect(() => {
+    console.info('[Softphone build] 2025-11-25T23:36Z');
+  }, []);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [callStatus, setCallStatus] = useState<CallStatus>('idle');
   const [isMuted, setIsMuted] = useState(false);
