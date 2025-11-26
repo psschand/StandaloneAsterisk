@@ -784,7 +784,7 @@ export default function Softphone() {
               <div className="flex items-center space-x-3">
                 <div className={`w-3 h-3 rounded-full ${isRegistered ? 'bg-green-500' : 'bg-red-500'} animate-pulse`}></div>
                 <div>
-                  <h1 className="text-xl font-bold text-gray-900">WebRTC Softphone</h1>
+                  <h1 className="text-xl font-bold text-gray-900">🔴 TEST BUILD NOV 26 🔴</h1>
                   <p className="text-sm text-gray-500">
                     {credentials?.extension && (
                       <span className="font-medium text-gray-700">Extension {credentials.extension}</span>
