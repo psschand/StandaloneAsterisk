@@ -148,46 +148,42 @@ func (IVROption) TableName() string { return "ivr_options" }
 // CDR represents Call Detail Record
 // @Description Call detail record for billing and analytics
 type CDR struct {
-	ID            int64                  `gorm:"column:id;primaryKey;autoIncrement" json:"id" example:"1"`
-	TenantID      string                 `gorm:"column:tenant_id;type:varchar(64);not null;index:idx_tenant_calldate" json:"tenant_id" example:"acme-corp"`
-	CallDate      time.Time              `gorm:"column:calldate;not null;index:idx_calldate" json:"calldate"`
-	CLID          string                 `gorm:"column:clid;type:varchar(80);not null" json:"clid" example:"\"John Doe\" <+15551234567>"`
-	Src           string                 `gorm:"column:src;type:varchar(80);not null;index:idx_src" json:"src" example:"+15551234567"`
-	Dst           string                 `gorm:"column:dst;type:varchar(80);not null;index:idx_dst" json:"dst" example:"+15559876543"`
-	DContext      string                 `gorm:"column:dcontext;type:varchar(80);not null" json:"dcontext" example:"from-trunk"`
-	Channel       string                 `gorm:"column:channel;type:varchar(80);not null" json:"channel" example:"PJSIP/twilio-trunk-00000001"`
-	DstChannel    string                 `gorm:"column:dstchannel;type:varchar(80);not null" json:"dstchannel" example:"PJSIP/acme-agent1-00000002"`
-	LastApp       string                 `gorm:"column:lastapp;type:varchar(80);not null" json:"lastapp" example:"Dial"`
-	LastData      string                 `gorm:"column:lastdata;type:varchar(80);not null" json:"lastdata" example:"PJSIP/acme-agent1,30"`
-	Duration      int                    `gorm:"column:duration;not null;default:0" json:"duration" example:"125"`
-	BillSec       int                    `gorm:"column:billsec;not null;default:0" json:"billsec" example:"120"`
-	Disposition   common.CallDisposition `gorm:"column:disposition;type:varchar(45);not null;index:idx_disposition" json:"disposition" example:"ANSWERED"`
-	AMAFlags      int                    `gorm:"column:amaflags;not null;default:0" json:"amaflags" example:"3"`
-	AccountCode   string                 `gorm:"column:accountcode;type:varchar(20);not null;index:idx_accountcode" json:"accountcode" example:"acme-corp"`
-	UniqueID      string                 `gorm:"column:uniqueid;type:varchar(150);not null;index:idx_uniqueid" json:"uniqueid" example:"1634567890.123"`
-	UserField     string                 `gorm:"column:userfield;type:varchar(255);not null" json:"userfield,omitempty"`
-	RecordingFile *string                `gorm:"column:recordingfile;type:varchar(512)" json:"recordingfile,omitempty"`
-	DIDID         *int64                 `gorm:"column:did_id" json:"did_id,omitempty" example:"1"`
-	UserID        *int64                 `gorm:"column:user_id;index:idx_user" json:"user_id,omitempty" example:"1"`
-	QueueName     *string                `gorm:"column:queue_name;type:varchar(128);index:idx_queue" json:"queue_name,omitempty" example:"sales"`
-	QueueWaitTime int                    `gorm:"column:queue_wait_time;default:0" json:"queue_wait_time" example:"15"`
-	Metadata      common.JSONMap         `gorm:"column:metadata;type:json" json:"metadata,omitempty"`
+	ID                  int64     `gorm:"column:id;primaryKey;autoIncrement" json:"id" example:"1"`
+	TenantID            string    `gorm:"column:tenant_id;type:varchar(36);not null;index" json:"tenant_id" example:"acme-corp"`
+	UniqueID            string    `gorm:"column:unique_id;type:varchar(100);not null;uniqueIndex" json:"unique_id" example:"1634567890.123"`
+	CallDate            time.Time `gorm:"column:call_date;not null;index" json:"calldate"`
+	CallerID            *string   `gorm:"column:caller_id;type:varchar(100);index" json:"src"`
+	Destination         *string   `gorm:"column:destination;type:varchar(100);index" json:"dst"`
+	Channel             *string   `gorm:"column:channel;type:varchar(100)" json:"channel"`
+	DestinationChannel  *string   `gorm:"column:destination_channel;type:varchar(100)" json:"destination_channel"`
+	Direction           *string   `gorm:"column:direction;type:varchar(20);index" json:"direction"`
+	Duration            int       `gorm:"column:duration;not null;default:0" json:"duration" example:"125"`
+	BillableDuration    int       `gorm:"column:billable_duration;not null;default:0" json:"billsec" example:"120"`
+	Disposition         *string   `gorm:"column:disposition;type:varchar(50);index" json:"disposition" example:"ANSWERED"`
+	RecordingURL        *string   `gorm:"column:recording_url;type:varchar(500)" json:"recordingfile"`
+	AgentID             *int64    `gorm:"column:agent_id;index" json:"agent_id,omitempty"`
+	AgentName           *string   `gorm:"column:agent_name;type:varchar(255)" json:"agent_name,omitempty"`
+	QueueName           *string   `gorm:"column:queue_name;type:varchar(100);index" json:"queue_name,omitempty" example:"sales"`
+	DIDNumber           *string   `gorm:"column:did_number;type:varchar(50)" json:"did_number,omitempty"`
+	UserField           *string   `gorm:"column:user_field;type:varchar(255)" json:"user_field,omitempty"`
+	Transcript          *string   `gorm:"column:transcript;type:text" json:"transcript,omitempty"`
+	Summary             *string   `gorm:"column:summary;type:text" json:"summary,omitempty"`
+	TranscriptionStatus *string   `gorm:"column:transcription_status;type:varchar(20);default:'pending'" json:"transcription_status,omitempty"`
+	CreatedAt           time.Time `gorm:"column:created_at;default:CURRENT_TIMESTAMP" json:"created_at"`
 
 	// Relations
 	Tenant *core.Tenant `gorm:"foreignKey:TenantID" json:"tenant,omitempty"`
-	DID    *DID         `gorm:"foreignKey:DIDID" json:"did,omitempty"`
-	User   *core.User   `gorm:"foreignKey:UserID" json:"user,omitempty"`
-	Queue  *Queue       `gorm:"foreignKey:QueueName;references:Name" json:"queue,omitempty"`
+	Agent  *core.User   `gorm:"foreignKey:AgentID" json:"agent,omitempty"`
 }
 
 // TableName specifies the table name
 func (CDR) TableName() string {
-	return "cdr"
+	return "cdrs"
 }
 
 // IsAnswered checks if the call was answered
 func (c *CDR) IsAnswered() bool {
-	return c.Disposition == common.CallDispositionAnswered
+	return c.Disposition != nil && *c.Disposition == "ANSWERED"
 }
 
 // GetDurationMinutes returns duration in minutes

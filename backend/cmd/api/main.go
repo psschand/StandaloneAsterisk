@@ -180,7 +180,9 @@ func main() {
 	aiAgentService := chat.NewAIAgentService(db, geminiAPIKey)
 	aiChatService := chat.NewChatService(db, aiAgentService)
 	knowledgeBaseService := chat.NewKnowledgeBaseService(db, aiAgentService)
+	transcriptionService := service.NewTranscriptionService(db, cdrRepo, geminiAPIKey)
 	log.Println("AI Chat services initialized (Gemini + RAG)")
+	log.Println("Transcription service initialized (Gemini Audio)")
 
 	log.Println("Services initialized")
 
@@ -203,6 +205,7 @@ func main() {
 	outboundRouteHandler := handler.NewOutboundRouteHandler(outboundRouteService)
 	securityHandler := handler.NewSecurityHandler()
 	ttsHandler := handler.NewTTSHandler()
+	transcriptionHandler := handler.NewTranscriptionHandler(transcriptionService)
 
 	// Create adapter for WebSocket handler to avoid import cycle
 	chatSessionAdapter := &chatSessionAdapter{chatService: chatService}
@@ -245,8 +248,11 @@ func main() {
 		})
 	})
 
-	// Serve static audio files
+	// Serve static audio files (TTS)
 	router.Static("/audio", "/app/data/audio")
+
+	// Serve call recordings from Asterisk monitor directory
+	router.Static("/recordings", "/var/spool/asterisk/monitor")
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -360,6 +366,8 @@ func main() {
 				cdr.GET("/by-queue/:queueName", cdrHandler.GetByQueue)
 				cdr.GET("/stats", cdrHandler.GetStats)
 				cdr.GET("/call-volume", cdrHandler.GetCallVolume)
+				cdr.POST("/:id/transcribe", transcriptionHandler.TranscribeCDR)
+				cdr.POST("/transcribe/all", transcriptionHandler.TranscribeAllPending)
 			}
 
 			// Agent state routes

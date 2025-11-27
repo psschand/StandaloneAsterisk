@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/psschand/callcenter/internal/asterisk"
@@ -9,6 +11,47 @@ import (
 	"github.com/psschand/callcenter/internal/repository"
 	"github.com/psschand/callcenter/pkg/errors"
 )
+
+// cleanCallerID extracts the actual number/name from Asterisk caller ID format
+// Converts: "" <hello> -> hello, "1000" <1000> -> 1000, "" <> -> ""
+func cleanCallerID(callerID string) string {
+	if callerID == "" {
+		return ""
+	}
+
+	// Remove leading/trailing whitespace
+	callerID = strings.TrimSpace(callerID)
+
+	// Extract value between angle brackets <value>
+	re := regexp.MustCompile(`<([^>]*)>`)
+	matches := re.FindStringSubmatch(callerID)
+	if len(matches) > 1 {
+		value := strings.TrimSpace(matches[1])
+		// If value between brackets is not empty, use it
+		if value != "" {
+			return value
+		}
+	}
+
+	// Extract value between first set of quotes "value"
+	re = regexp.MustCompile(`"([^"]*)"`)
+	matches = re.FindStringSubmatch(callerID)
+	if len(matches) > 1 {
+		value := strings.TrimSpace(matches[1])
+		// If quoted value is not empty, use it
+		if value != "" {
+			return value
+		}
+	}
+
+	// Check if the original string was empty pattern like "" <>
+	if strings.Contains(callerID, `""`) && strings.Contains(callerID, `<>`) {
+		return ""
+	}
+
+	// If no pattern matched or extracted value was empty, return original (trimmed)
+	return callerID
+}
 
 // CDRService handles CDR (Call Detail Record) operations
 type CDRService interface {
@@ -50,11 +93,11 @@ func (s *cdrService) toCDRResponse(cdr *asterisk.CDR) (*dto.CDRResponse, error) 
 		return nil, errors.New("INVALID_CDR", "cdr cannot be nil")
 	}
 
-	// Get agent name if UserID is set
+	// Get agent name if AgentID is set
 	var agentName *string
-	if cdr.UserID != nil {
-		user, err := s.userRepo.FindByID(context.Background(), *cdr.UserID)
-		if err == nil && user.FirstName != nil {
+	if cdr.AgentID != nil {
+		user, err := s.userRepo.FindByID(context.Background(), *cdr.AgentID)
+		if err == nil {
 			name := ""
 			if user.FirstName != nil {
 				name = *user.FirstName
@@ -69,23 +112,48 @@ func (s *cdrService) toCDRResponse(cdr *asterisk.CDR) (*dto.CDRResponse, error) 
 				agentName = &name
 			}
 		}
+	} else if cdr.AgentName != nil {
+		agentName = cdr.AgentName
+	}
+
+	// Convert disposition to string
+	var disposition string
+	if cdr.Disposition != nil {
+		disposition = *cdr.Disposition
+	}
+
+	// Convert CallerID and Destination to src/dst for frontend compatibility
+	var src, dst string
+	if cdr.CallerID != nil {
+		src = cleanCallerID(*cdr.CallerID)
+	}
+	if cdr.Destination != nil {
+		dst = cleanCallerID(*cdr.Destination)
+	}
+
+	// Build full recording URL if recording exists
+	var recordingURL *string
+	if cdr.RecordingURL != nil && *cdr.RecordingURL != "" {
+		fullURL := "/recordings/" + *cdr.RecordingURL
+		recordingURL = &fullURL
 	}
 
 	return &dto.CDRResponse{
-		ID:            cdr.ID,
-		TenantID:      cdr.TenantID,
-		CallDate:      cdr.CallDate,
-		CLID:          cdr.CLID,
-		Src:           cdr.Src,
-		Dst:           cdr.Dst,
-		Duration:      cdr.Duration,
-		BillSec:       cdr.BillSec,
-		Disposition:   cdr.Disposition,
-		RecordingFile: cdr.RecordingFile,
-		QueueName:     cdr.QueueName,
-		QueueWaitTime: cdr.QueueWaitTime,
-		AgentName:     agentName,
-		Metadata:      cdr.Metadata,
+		ID:                  cdr.ID,
+		TenantID:            cdr.TenantID,
+		CallDate:            cdr.CallDate,
+		Src:                 src,
+		Dst:                 dst,
+		Duration:            cdr.Duration,
+		BillSec:             cdr.BillableDuration,
+		Disposition:         disposition,
+		RecordingFile:       recordingURL,
+		QueueName:           cdr.QueueName,
+		AgentName:           agentName,
+		Direction:           cdr.Direction,
+		Transcript:          cdr.Transcript,
+		Summary:             cdr.Summary,
+		TranscriptionStatus: cdr.TranscriptionStatus,
 	}, nil
 }
 

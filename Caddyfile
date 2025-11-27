@@ -28,6 +28,14 @@ app.soham.top {
 		}
 	}
 
+	# Call recordings - proxy to backend
+	handle /recordings/* {
+		reverse_proxy backend:8001 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
 	# WebSocket Secure (WSS) proxy for Asterisk WebRTC
 	# Handle WebSocket connections to /ws endpoint
 	handle /ws {

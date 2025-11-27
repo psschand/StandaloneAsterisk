@@ -62,7 +62,7 @@ func (r *cdrRepository) FindByTenant(ctx context.Context, tenantID string, page,
 		Where("tenant_id = ?", tenantID).
 		Offset(offset).
 		Limit(pageSize).
-		Order("calldate DESC").
+		Order("call_date DESC").
 		Find(&cdrs).Error
 
 	return cdrs, total, err
@@ -75,7 +75,7 @@ func (r *cdrRepository) FindByDateRange(ctx context.Context, tenantID string, st
 
 	query := r.db.WithContext(ctx).
 		Model(&asterisk.CDR{}).
-		Where("tenant_id = ? AND calldate BETWEEN ? AND ?", tenantID, start, end)
+		Where("tenant_id = ? AND call_date BETWEEN ? AND ?", tenantID, start, end)
 
 	// Count total
 	if err := query.Count(&total).Error; err != nil {
@@ -87,7 +87,7 @@ func (r *cdrRepository) FindByDateRange(ctx context.Context, tenantID string, st
 	err := query.
 		Offset(offset).
 		Limit(pageSize).
-		Order("calldate DESC").
+		Order("call_date DESC").
 		Find(&cdrs).Error
 
 	return cdrs, total, err
@@ -99,17 +99,17 @@ func (r *cdrRepository) FindByUser(ctx context.Context, userID int64, page, page
 	var total int64
 
 	// Count total
-	if err := r.db.WithContext(ctx).Model(&asterisk.CDR{}).Where("user_id = ?", userID).Count(&total).Error; err != nil {
+	if err := r.db.WithContext(ctx).Model(&asterisk.CDR{}).Where("agent_id = ?", userID).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	// Get paginated results
 	offset := (page - 1) * pageSize
 	err := r.db.WithContext(ctx).
-		Where("user_id = ?", userID).
+		Where("agent_id = ?", userID).
 		Offset(offset).
 		Limit(pageSize).
-		Order("calldate DESC").
+		Order("call_date DESC").
 		Find(&cdrs).Error
 
 	return cdrs, total, err
@@ -134,7 +134,7 @@ func (r *cdrRepository) FindByQueue(ctx context.Context, tenantID, queueName str
 		Where("tenant_id = ? AND queue_name = ?", tenantID, queueName).
 		Offset(offset).
 		Limit(pageSize).
-		Order("calldate DESC").
+		Order("call_date DESC").
 		Find(&cdrs).Error
 
 	return cdrs, total, err
@@ -148,7 +148,7 @@ func (r *cdrRepository) GetStats(ctx context.Context, tenantID string, start, en
 	var totalCalls int64
 	if err := r.db.WithContext(ctx).
 		Model(&asterisk.CDR{}).
-		Where("tenant_id = ? AND calldate BETWEEN ? AND ?", tenantID, start, end).
+		Where("tenant_id = ? AND call_date BETWEEN ? AND ?", tenantID, start, end).
 		Count(&totalCalls).Error; err != nil {
 		return nil, err
 	}
@@ -158,7 +158,7 @@ func (r *cdrRepository) GetStats(ctx context.Context, tenantID string, start, en
 	var answeredCalls int64
 	if err := r.db.WithContext(ctx).
 		Model(&asterisk.CDR{}).
-		Where("tenant_id = ? AND calldate BETWEEN ? AND ? AND disposition = ?", tenantID, start, end, common.CallDispositionAnswered).
+		Where("tenant_id = ? AND call_date BETWEEN ? AND ? AND disposition = ?", tenantID, start, end, common.CallDispositionAnswered).
 		Count(&answeredCalls).Error; err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func (r *cdrRepository) GetStats(ctx context.Context, tenantID string, start, en
 	var avgDuration float64
 	if err := r.db.WithContext(ctx).
 		Model(&asterisk.CDR{}).
-		Where("tenant_id = ? AND calldate BETWEEN ? AND ? AND disposition = ?", tenantID, start, end, common.CallDispositionAnswered).
+		Where("tenant_id = ? AND call_date BETWEEN ? AND ? AND disposition = ?", tenantID, start, end, common.CallDispositionAnswered).
 		Select("AVG(duration)").
 		Scan(&avgDuration).Error; err != nil {
 		return nil, err
@@ -179,8 +179,8 @@ func (r *cdrRepository) GetStats(ctx context.Context, tenantID string, start, en
 	var totalTalkTime int64
 	if err := r.db.WithContext(ctx).
 		Model(&asterisk.CDR{}).
-		Where("tenant_id = ? AND calldate BETWEEN ? AND ?", tenantID, start, end).
-		Select("SUM(billsec)").
+		Where("tenant_id = ? AND call_date BETWEEN ? AND ?", tenantID, start, end).
+		Select("SUM(billable_duration)").
 		Scan(&totalTalkTime).Error; err != nil {
 		return nil, err
 	}
@@ -205,9 +205,9 @@ func (r *cdrRepository) GetCallVolumeByHour(ctx context.Context, tenantID string
 
 	rows, err := r.db.WithContext(ctx).
 		Model(&asterisk.CDR{}).
-		Select("HOUR(calldate) as hour, COUNT(*) as count").
-		Where("tenant_id = ? AND calldate BETWEEN ? AND ?", tenantID, startOfDay, endOfDay).
-		Group("HOUR(calldate)").
+		Select("HOUR(call_date) as hour, COUNT(*) as count").
+		Where("tenant_id = ? AND call_date BETWEEN ? AND ?", tenantID, startOfDay, endOfDay).
+		Group("HOUR(call_date)").
 		Order("hour").
 		Rows()
 	if err != nil {

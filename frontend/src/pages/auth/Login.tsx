@@ -167,66 +167,11 @@ export default function Login() {
       {/* Footer */}
       <div className="mt-6">
         <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg mb-3">
-          <p className="text-sm font-semibold text-blue-900 mb-3">🔐 Test Users (All passwords: Password123!)</p>
-          <div className="text-xs text-blue-800 space-y-2">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-              <div>
-                <p className="font-semibold">Admin:</p>
-                <p className="text-blue-600">admin@callcenter.com</p>
-              </div>
-              <div>
-                <p className="font-semibold">Extension:</p>
-                <p className="text-blue-600">1000 (WebRTC)</p>
-              </div>
-              
-              <div className="col-span-2 border-t border-blue-200 pt-2 mt-1"></div>
-              
-              <div>
-                <p className="font-semibold">Manager:</p>
-                <p className="text-blue-600">manager@callcenter.com</p>
-              </div>
-              <div>
-                <p className="font-semibold">Extension:</p>
-                <p className="text-blue-600">None</p>
-              </div>
-              
-              <div className="col-span-2 border-t border-blue-200 pt-2 mt-1"></div>
-              
-              <div>
-                <p className="font-semibold">Agent 1:</p>
-                <p className="text-blue-600">agent1@callcenter.com</p>
-              </div>
-              <div>
-                <p className="font-semibold">Extension:</p>
-                <p className="text-blue-600">1001 (WebRTC)</p>
-              </div>
-              
-              <div className="col-span-2 border-t border-blue-200 pt-2 mt-1"></div>
-              
-              <div>
-                <p className="font-semibold">Agent 2:</p>
-                <p className="text-blue-600">agent2@callcenter.com</p>
-              </div>
-              <div>
-                <p className="font-semibold">Extension:</p>
-                <p className="text-blue-600">None</p>
-              </div>
-              
-              <div className="col-span-2 border-t border-blue-200 pt-2 mt-1"></div>
-              
-              <div>
-                <p className="font-semibold">Test User:</p>
-                <p className="text-blue-600">test@test.com</p>
-              </div>
-              <div>
-                <p className="font-semibold">Extension:</p>
-                <p className="text-blue-600">None</p>
-              </div>
-            </div>
-          </div>
-          <div className="mt-3 pt-3 border-t border-blue-200">
-            <p className="text-xs text-blue-700 font-medium">💡 Use admin or agent1 to test WebRTC softphone!</p>
-          </div>
+          <p className="text-sm font-semibold text-blue-900">Need access?</p>
+          <p className="text-xs text-blue-800">
+            Contact your administrator to obtain login credentials. Demo users that were previously listed here
+            have been removed to keep the live site compliant with browser security policies.
+          </p>
         </div>
         <div className="flex gap-4 text-xs text-gray-500 justify-center">
           <button

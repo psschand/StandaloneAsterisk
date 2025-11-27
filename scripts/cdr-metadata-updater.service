@@ -1,0 +1,14 @@
+[Unit]
+Description=CDR Metadata Updater
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/wsp/call-center/standalone-asterix
+ExecStart=/home/ubuntu/wsp/call-center/standalone-asterix/scripts/update_cdr_metadata.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

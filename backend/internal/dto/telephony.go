@@ -232,34 +232,36 @@ type UpdateQueueMemberRequest struct {
 // CDRResponse represents call detail record data
 // @Description Call detail record
 type CDRResponse struct {
-	ID            int64                  `json:"id" example:"1"`
-	TenantID      string                 `json:"tenant_id" example:"acme-corp"`
-	CallDate      time.Time              `json:"calldate"`
-	CLID          string                 `json:"clid" example:"\"John Doe\" <+15551234567>"`
-	Src           string                 `json:"src" example:"+15551234567"`
-	Dst           string                 `json:"dst" example:"+15559876543"`
-	Duration      int                    `json:"duration" example:"125"`
-	BillSec       int                    `json:"billsec" example:"120"`
-	Disposition   common.CallDisposition `json:"disposition" example:"ANSWERED"`
-	RecordingFile *string                `json:"recordingfile,omitempty"`
-	QueueName     *string                `json:"queue_name,omitempty" example:"sales"`
-	QueueWaitTime int                    `json:"queue_wait_time" example:"15"`
-	AgentName     *string                `json:"agent_name,omitempty" example:"John Doe"`
-	Metadata      common.JSONMap         `json:"metadata,omitempty"`
+	ID                  int64     `json:"id" example:"1"`
+	TenantID            string    `json:"tenant_id" example:"acme-corp"`
+	CallDate            time.Time `json:"calldate"`
+	Src                 string    `json:"src" example:"+15551234567"`
+	Dst                 string    `json:"dst" example:"+15559876543"`
+	Duration            int       `json:"duration" example:"125"`
+	BillSec             int       `json:"billsec" example:"120"`
+	Disposition         string    `json:"disposition" example:"ANSWERED"`
+	RecordingFile       *string   `json:"recordingfile,omitempty"`
+	QueueName           *string   `json:"queue_name,omitempty" example:"sales"`
+	AgentName           *string   `json:"agent_name,omitempty" example:"John Doe"`
+	Direction           *string   `json:"direction,omitempty" example:"inbound"`
+	Transcript          *string   `json:"transcript,omitempty"`
+	Summary             *string   `json:"summary,omitempty"`
+	TranscriptionStatus *string   `json:"transcription_status,omitempty" example:"completed"`
 }
 
 // CDRFilterRequest represents CDR filter parameters
 // @Description Filter parameters for CDR list
 type CDRFilterRequest struct {
-	StartDate   *time.Time              `form:"start_date" json:"start_date,omitempty"`
-	EndDate     *time.Time              `form:"end_date" json:"end_date,omitempty"`
-	Disposition *common.CallDisposition `form:"disposition" json:"disposition,omitempty" example:"ANSWERED"`
-	QueueName   *string                 `form:"queue_name" json:"queue_name,omitempty" example:"sales"`
-	Src         *string                 `form:"src" json:"src,omitempty" example:"+15551234567"`
-	Dst         *string                 `form:"dst" json:"dst,omitempty" example:"+15559876543"`
-	UserID      *int64                  `form:"user_id" json:"user_id,omitempty" example:"1"`
-	Page        int                     `form:"page" json:"page" binding:"min=1" example:"1"`
-	PageSize    int                     `form:"page_size" json:"page_size" binding:"min=1,max=100" example:"20"`
+	StartDate   *time.Time `form:"start_date" json:"start_date,omitempty"`
+	EndDate     *time.Time `form:"end_date" json:"end_date,omitempty"`
+	Disposition *string    `form:"disposition" json:"disposition,omitempty" example:"ANSWERED"`
+	QueueName   *string    `form:"queue_name" json:"queue_name,omitempty" example:"sales"`
+	Src         *string    `form:"src" json:"src,omitempty" example:"+15551234567"`
+	Dst         *string    `form:"dst" json:"dst,omitempty" example:"+15559876543"`
+	AgentID     *int64     `form:"agent_id" json:"agent_id,omitempty" example:"1"`
+	Direction   *string    `form:"direction" json:"direction,omitempty" example:"inbound"`
+	Page        int        `form:"page" json:"page" binding:"min=1" example:"1"`
+	PageSize    int        `form:"page_size" json:"page_size" binding:"min=1,max=100" example:"20"`
 }
 
 // CDRStatsResponse represents CDR statistics

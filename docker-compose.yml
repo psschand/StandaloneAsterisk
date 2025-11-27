@@ -5,11 +5,14 @@ services:
     image: call-center-asterisk-runtime:arm64
     container_name: asterisk
     hostname: asterisk
+    cpus: '1.0'
+    mem_limit: 512m
     volumes:
       - ./docker/asterisk/config:/etc/asterisk
       - asterisk_recordings:/var/spool/asterisk/monitor
       - asterisk_voicemail:/var/spool/asterisk/voicemail
       - asterisk_sounds:/var/lib/asterisk/sounds
+      - asterisk_cdr:/var/log/asterisk/cdr-csv
     ports:
       - "5060:5060/udp"
       - "5060:5060/tcp"
@@ -38,12 +41,14 @@ services:
   mysql:
     image: mysql:8.0
     container_name: mysql
+    cpus: '0.5'
+    mem_limit: 768m
     environment:
       - MYSQL_HOST=mysql
       - MYSQL_DATABASE=${MYSQL_DATABASE}
       - MYSQL_USER=${MYSQL_USER}
       - MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD}
-    command: --default-authentication-plugin=mysql_native_password
+    command: --default-authentication-plugin=mysql_native_password --innodb-buffer-pool-size=256M --max-connections=50
     ports:
       - "3306:3306"
     volumes:
@@ -73,6 +78,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: backend
+    cpus: '0.5'
+    mem_limit: 256m
     restart: unless-stopped
     ports:
       - "8001:8001"
@@ -100,6 +107,7 @@ services:
       - ./backend/.env:/app/.env:ro
       - /var/run/fail2ban:/var/run/fail2ban
       - /var/log/fail2ban.log:/var/log/fail2ban.log:ro
+      - asterisk_recordings:/var/spool/asterisk/monitor:ro
 
   frontend:
     build:
@@ -143,6 +151,8 @@ volumes:
   asterisk_voicemail:
     driver: local
   asterisk_sounds:
+    driver: local
+  asterisk_cdr:
     driver: local
   caddy_data:
     driver: local

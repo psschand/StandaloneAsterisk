@@ -39,9 +39,9 @@ export const config = {
       mute: (id: string) => `/api/v1/calls/${id}/mute`,
     },
     cdrs: {
-      list: '/api/v1/cdrs',
-      get: (id: number) => `/api/v1/cdrs/${id}`,
-      export: '/api/v1/cdrs/export',
+      list: '/api/v1/cdr',
+      get: (id: number) => `/api/v1/cdr/${id}`,
+      export: '/api/v1/cdr/export',
     },
     dids: '/api/v1/dids',
     contacts: {
