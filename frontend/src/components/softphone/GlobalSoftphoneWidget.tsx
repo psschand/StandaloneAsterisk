@@ -41,10 +41,42 @@ const GlobalSoftphoneWidget: React.FC = () => {
     setVolume
   } = useSoftphone();
 
-  // Only show if there's an active call or incoming call AND we're minimized
-  if ((callStatus === 'idle' && !incomingCall) || !isMinimized) {
+  // Request notification permission on mount
+  React.useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  // Show browser notification for incoming calls
+  React.useEffect(() => {
+    if (incomingCall && 'Notification' in window && Notification.permission === 'granted') {
+      const notification = new Notification('Incoming Call', {
+        body: `Call from ${incomingCall.number}`,
+        icon: '/favicon.ico',
+        tag: 'incoming-call',
+        requireInteraction: true,
+      });
+
+      notification.onclick = () => {
+        window.focus();
+        navigate('/softphone');
+        notification.close();
+      };
+
+      return () => {
+        notification.close();
+      };
+    }
+  }, [incomingCall, navigate]);
+
+  // Don't show widget if no active call and no incoming call
+  if (callStatus === 'idle' && !incomingCall) {
     return null;
   }
+
+  // Don't show active call widget if on softphone page and not minimized
+  const showActiveCallWidget = callStatus !== 'idle' && isMinimized;
 
   const handleMaximize = () => {
     setIsMinimized(false);
@@ -52,41 +84,46 @@ const GlobalSoftphoneWidget: React.FC = () => {
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-[9999]">
-      {/* Incoming Call Widget */}
+    <>
+      {/* Incoming Call - Top Center Banner (Always Visible) */}
       {incomingCall && (
-        <div className="bg-white rounded-lg shadow-2xl border-2 border-blue-500 p-4 w-80 mb-4 animate-bounce">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-              <PhoneIncoming className="w-6 h-6 text-blue-600 animate-pulse" />
+        <div className="fixed top-0 left-0 right-0 z-[10000] bg-gradient-to-r from-blue-600 to-blue-700 shadow-2xl">
+          <div className="max-w-7xl mx-auto px-4 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center animate-pulse">
+                  <PhoneIncoming className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm text-blue-100 font-medium">Incoming Call</p>
+                  <p className="text-2xl font-bold text-white">{incomingCall.number || 'Unknown'}</p>
+                </div>
+              </div>
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={answer}
+                  className="bg-green-500 hover:bg-green-600 text-white py-3 px-6 rounded-lg font-semibold flex items-center gap-2 transition-all shadow-lg hover:shadow-xl"
+                >
+                  <Phone className="w-5 h-5" />
+                  Answer
+                </button>
+                <button
+                  onClick={reject}
+                  className="bg-red-500 hover:bg-red-600 text-white py-3 px-6 rounded-lg font-semibold flex items-center gap-2 transition-all shadow-lg hover:shadow-xl"
+                >
+                  <PhoneOff className="w-5 h-5" />
+                  Decline
+                </button>
+              </div>
             </div>
-            <div className="flex-1">
-              <p className="text-sm text-gray-600">Incoming Call</p>
-              <p className="text-lg font-bold text-gray-900">{incomingCall.number}</p>
-            </div>
-          </div>
-          
-          <div className="flex gap-2">
-            <button
-              onClick={answer}
-              className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg font-medium flex items-center justify-center gap-2"
-            >
-              <Phone className="w-4 h-4" />
-              Answer
-            </button>
-            <button
-              onClick={reject}
-              className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded-lg font-medium flex items-center justify-center gap-2"
-            >
-              <PhoneOff className="w-4 h-4" />
-              Reject
-            </button>
           </div>
         </div>
       )}
 
-      {/* Active Call Widget */}
-      {callStatus !== 'idle' && (
+      {/* Active Call Widget - Bottom Right (Only when minimized) */}
+      {showActiveCallWidget && (
+        <div className="fixed bottom-4 right-4 z-[9999]">
         <div className="bg-gradient-to-br from-blue-600 to-blue-700 text-white rounded-lg shadow-2xl p-4 w-80">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -181,8 +218,9 @@ const GlobalSoftphoneWidget: React.FC = () => {
             </span>
           </div>
         </div>
+        </div>
       )}
-    </div>
+    </>
   );
 };
 

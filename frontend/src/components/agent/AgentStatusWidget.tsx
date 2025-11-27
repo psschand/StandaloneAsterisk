@@ -15,7 +15,7 @@ interface AgentState {
   agent_id: number;
   user_id: number;
   username: string;
-  status: 'available' | 'on_call' | 'on_break' | 'away' | 'offline';
+  state: 'available' | 'busy' | 'break' | 'away' | 'offline' | 'dnd';
   extension?: string;
   queue_memberships?: string[];
   current_call_id?: string;
@@ -41,8 +41,8 @@ const statusConfig = {
     hoverColor: 'hover:bg-green-100',
     description: 'Ready to take calls'
   },
-  on_call: {
-    label: 'On Call',
+  busy: {
+    label: 'Busy',
     icon: Phone,
     color: 'text-blue-600',
     bgColor: 'bg-blue-50',
@@ -50,7 +50,7 @@ const statusConfig = {
     hoverColor: 'hover:bg-blue-100',
     description: 'Currently on a call'
   },
-  on_break: {
+  break: {
     label: 'On Break',
     icon: Coffee,
     color: 'text-yellow-600',
@@ -76,6 +76,15 @@ const statusConfig = {
     borderColor: 'border-red-200',
     hoverColor: 'hover:bg-red-100',
     description: 'Not available'
+  },
+  dnd: {
+    label: 'Do Not Disturb',
+    icon: PhoneOff,
+    color: 'text-purple-600',
+    bgColor: 'bg-purple-50',
+    borderColor: 'border-purple-200',
+    hoverColor: 'hover:bg-purple-100',
+    description: 'Do not disturb'
   }
 };
 
@@ -107,14 +116,14 @@ export default function AgentStatusWidget() {
 
   // Update agent status mutation
   const updateStatusMutation = useMutation({
-    mutationFn: async (newStatus: AgentState['status']) => {
+    mutationFn: async (newStatus: AgentState['state']) => {
       const response = await fetch('/api/v1/agent-state/me', {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ state: newStatus }),
       });
       if (!response.ok) {
         throw new Error('Failed to update status');
@@ -196,7 +205,7 @@ export default function AgentStatusWidget() {
     );
   }
 
-  const currentStatus = agentState.status || 'offline';
+  const currentStatus = agentState.state || 'offline';
   const config = statusConfig[currentStatus];
   const StatusIcon = config.icon;
 
@@ -261,7 +270,7 @@ export default function AgentStatusWidget() {
               const statusConf = statusConfig[status];
               const StatusOptionIcon = statusConf.icon;
               const isCurrentStatus = status === currentStatus;
-              const isDisabled = status === 'on_call'; // Can't manually set to on_call
+              const isDisabled = status === 'busy'; // Can't manually set to busy
 
               return (
                 <button
@@ -311,7 +320,7 @@ export default function AgentStatusWidget() {
               </button>
               <button
                 onClick={() => setBreakMutation.mutate()}
-                disabled={currentStatus === 'on_break'}
+                disabled={currentStatus === 'break'}
                 className="flex items-center justify-center space-x-2 px-3 py-2 text-sm font-medium text-yellow-700 bg-yellow-50 hover:bg-yellow-100 rounded-lg transition-colors border border-yellow-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Coffee className="w-4 h-4" />

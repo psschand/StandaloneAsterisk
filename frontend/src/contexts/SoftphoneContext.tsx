@@ -168,7 +168,78 @@ export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
         },
         delegate: {
           onInvite: (invitation) => {
-            const callerNumber = invitation.remoteIdentity.uri.user || 'Unknown';
+            console.log('[Softphone] === Incoming Call Debug ===');
+            console.log('[Softphone] Remote Identity:', invitation.remoteIdentity);
+            console.log('[Softphone] Display Name:', invitation.remoteIdentity.displayName);
+            console.log('[Softphone] URI:', invitation.remoteIdentity.uri.toString());
+            console.log('[Softphone] URI User:', invitation.remoteIdentity.uri.user);
+            
+            // Extract caller ID from SIP headers
+            // Try multiple sources in order of preference
+            let callerNumber = 'Unknown';
+            
+            // Check incoming request for additional headers
+            const incomingRequest = (invitation as any).incomingInviteRequest;
+            if (incomingRequest && incomingRequest.message) {
+              console.log('[Softphone] Incoming Request Headers:', incomingRequest.message.headers);
+              
+              // Try P-Asserted-Identity header first (most reliable)
+              const paiHeader = incomingRequest.message.getHeader('P-Asserted-Identity');
+              if (paiHeader) {
+                console.log('[Softphone] P-Asserted-Identity:', paiHeader);
+                const match = paiHeader.match(/<sip:([^@>]+)@/) || paiHeader.match(/sip:([^@>]+)@/);
+                if (match && match[1]) {
+                  callerNumber = match[1];
+                  console.log('[Softphone] Extracted from P-Asserted-Identity:', callerNumber);
+                }
+              }
+              
+              // Try Remote-Party-ID header
+              if (callerNumber === 'Unknown') {
+                const rpidHeader = incomingRequest.message.getHeader('Remote-Party-ID');
+                if (rpidHeader) {
+                  console.log('[Softphone] Remote-Party-ID:', rpidHeader);
+                  const match = rpidHeader.match(/<sip:([^@>]+)@/) || rpidHeader.match(/sip:([^@>]+)@/);
+                  if (match && match[1]) {
+                    callerNumber = match[1];
+                    console.log('[Softphone] Extracted from Remote-Party-ID:', callerNumber);
+                  }
+                }
+              }
+              
+              // Try From header
+              if (callerNumber === 'Unknown') {
+                const fromHeader = incomingRequest.message.getHeader('From');
+                if (fromHeader) {
+                  console.log('[Softphone] From Header:', fromHeader);
+                  // Extract from From: "Name" <sip:number@domain>
+                  const match = fromHeader.match(/<sip:([^@>]+)@/) || fromHeader.match(/sip:([^@>]+)@/);
+                  if (match && match[1]) {
+                    callerNumber = match[1];
+                    console.log('[Softphone] Extracted from From header:', callerNumber);
+                  }
+                }
+              }
+            }
+            
+            // Fallback to display name
+            if (callerNumber === 'Unknown') {
+              const displayName = invitation.remoteIdentity.displayName;
+              if (displayName && displayName !== '') {
+                callerNumber = displayName;
+                console.log('[Softphone] Using display name:', callerNumber);
+              }
+            }
+            
+            // Final fallback to URI user part
+            if (callerNumber === 'Unknown' && invitation.remoteIdentity.uri.user) {
+              callerNumber = invitation.remoteIdentity.uri.user;
+              console.log('[Softphone] Using URI user:', callerNumber);
+            }
+            
+            console.log('[Softphone] Final caller number:', callerNumber);
+            console.log('[Softphone] === End Debug ===');
+            
             setIncomingCall({
               id: Date.now().toString(),
               number: callerNumber,

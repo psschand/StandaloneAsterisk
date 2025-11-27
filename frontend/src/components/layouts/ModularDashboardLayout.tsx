@@ -6,15 +6,19 @@ import {
   X,
   ChevronDown,
   ChevronRight,
+  Phone,
+  PhoneOff,
 } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import { getModulesForRole, getQuickAccessItems } from '../../config/modules';
 import AgentStatusWidget from '../agent/AgentStatusWidget';
+import { useSoftphone } from '../../contexts/SoftphoneContext';
 
 export default function ModularDashboardLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
+  const { isRegistered, callStatus } = useSoftphone();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set(['dashboard']));
 
@@ -233,6 +237,29 @@ export default function ModularDashboardLayout() {
             <div className="flex items-center space-x-4">
               {/* Agent Status Widget */}
               <AgentStatusWidget />
+              
+              {/* Softphone Launcher */}
+              <button
+                onClick={() => navigate('/softphone')}
+                className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg border transition-all ${
+                  isRegistered
+                    ? 'bg-green-50 border-green-200 hover:bg-green-100 text-green-700'
+                    : 'bg-gray-50 border-gray-200 hover:bg-gray-100 text-gray-600'
+                }`}
+                title={isRegistered ? 'Softphone Registered' : 'Softphone Not Registered'}
+              >
+                {isRegistered ? (
+                  <Phone className="w-4 h-4 text-green-600" />
+                ) : (
+                  <PhoneOff className="w-4 h-4 text-gray-500" />
+                )}
+                <span className="text-sm font-medium">
+                  {isRegistered ? 'Registered' : 'Offline'}
+                </span>
+                {callStatus !== 'idle' && (
+                  <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
+                )}
+              </button>
               
               <div className="hidden sm:block text-sm text-gray-600">
                 <span className="text-gray-400">Welcome,</span>{' '}
