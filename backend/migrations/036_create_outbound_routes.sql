@@ -23,8 +23,8 @@ CREATE TABLE IF NOT EXISTS outbound_routes (
     UNIQUE KEY unique_tenant_name (tenant_id, name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Insert default routes for demo-tenant
-INSERT INTO outbound_routes (tenant_id, name, description, pattern, trunk_id, priority, enabled) VALUES
+-- Insert default routes for demo-tenant (skip if exists)
+INSERT IGNORE INTO outbound_routes (tenant_id, name, description, pattern, trunk_id, priority, enabled) VALUES
 ('demo-tenant', 'US/Canada', 'North America (NANP)', '^1[2-9][0-9]{9}$', 'twilio_trunk', 10, 1),
 ('demo-tenant', 'UK', 'United Kingdom', '^44[0-9]{10}$', 'twilio_trunk', 20, 1),
 ('demo-tenant', 'International', 'All other countries', '^\\+?[0-9]{8,15}$', 'twilio_trunk', 99, 1);

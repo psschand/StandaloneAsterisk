@@ -2,10 +2,10 @@
 -- Description: Align IVR menus table with frontend requirements for builder UI
 
 ALTER TABLE ivr_menus
-    ADD COLUMN display_name VARCHAR(255) NULL AFTER name,
-    ADD COLUMN status VARCHAR(50) NOT NULL DEFAULT 'active' AFTER max_attempts,
-    ADD COLUMN invalid_option_action VARCHAR(50) NOT NULL DEFAULT 'repeat' AFTER status,
-    ADD COLUMN timeout_action VARCHAR(50) NOT NULL DEFAULT 'repeat' AFTER invalid_option_action;
+    ADD COLUMN IF NOT EXISTS display_name VARCHAR(255) NULL AFTER name,
+    ADD COLUMN IF NOT EXISTS status VARCHAR(50) NOT NULL DEFAULT 'active' AFTER max_attempts,
+    ADD COLUMN IF NOT EXISTS invalid_option_action VARCHAR(50) NOT NULL DEFAULT 'repeat' AFTER status,
+    ADD COLUMN IF NOT EXISTS timeout_action VARCHAR(50) NOT NULL DEFAULT 'repeat' AFTER invalid_option_action;
 
 UPDATE ivr_menus
 SET status = CASE

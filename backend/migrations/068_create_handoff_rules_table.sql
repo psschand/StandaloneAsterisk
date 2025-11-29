@@ -1,0 +1,25 @@
+-- Create handoff_rules table
+CREATE TABLE IF NOT EXISTS `handoff_rules` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `tenant_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` text COLLATE utf8mb4_unicode_ci,
+  `trigger_type` enum('keyword','intent','sentiment','timeout','confidence','message_count','manual','no_answer') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `trigger_value` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `trigger_operator` enum('equals','contains','less_than','greater_than','between') COLLATE utf8mb4_unicode_ci DEFAULT 'contains',
+  `priority` int DEFAULT '0',
+  `target_queue_id` bigint DEFAULT NULL,
+  `message_template` text COLLATE utf8mb4_unicode_ci,
+  `notify_agent` tinyint(1) DEFAULT '1',
+  `is_active` tinyint(1) DEFAULT '1',
+  `execution_count` int DEFAULT '0',
+  `last_executed_at` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_tenant_active` (`tenant_id`,`is_active`),
+  KEY `idx_priority` (`priority` DESC),
+  KEY `target_queue_id` (`target_queue_id`),
+  CONSTRAINT `handoff_rules_ibfk_1` FOREIGN KEY (`tenant_id`) REFERENCES `tenants` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `handoff_rules_ibfk_2` FOREIGN KEY (`target_queue_id`) REFERENCES `queues` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

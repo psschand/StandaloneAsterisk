@@ -247,7 +247,7 @@ CREATE TABLE IF NOT EXISTS quick_replies (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Insert default AI config for existing tenants
-INSERT INTO ai_agent_config (tenant_id, is_enabled, model, system_prompt, greeting_message)
+INSERT IGNORE INTO ai_agent_config (tenant_id, is_enabled, model, system_prompt, greeting_message)
 SELECT id, TRUE, 'gemini-pro',
     'You are a helpful customer service AI assistant. Be friendly, professional, and concise. 
     If you cannot answer a question with confidence, politely offer to connect the customer with a human agent.
@@ -257,22 +257,22 @@ FROM tenants
 WHERE id NOT IN (SELECT tenant_id FROM ai_agent_config);
 
 -- Insert default handoff rules
-INSERT INTO handoff_rules (tenant_id, name, trigger_type, trigger_value, priority, message_template)
+INSERT IGNORE INTO handoff_rules (tenant_id, name, trigger_type, trigger_value, priority, message_template)
 SELECT id, 'Customer Requests Human', 'keyword', 'agent,human,person,representative,speak to someone', 100,
     'Of course! Let me connect you with one of our team members who can assist you personally.'
 FROM tenants;
 
-INSERT INTO handoff_rules (tenant_id, name, trigger_type, trigger_value, priority, message_template)
+INSERT IGNORE INTO handoff_rules (tenant_id, name, trigger_type, trigger_value, priority, message_template)
 SELECT id, 'Low Confidence Response', 'confidence', '0.5', 90,
     'I want to make sure you get the best help. Let me connect you with a specialist.'
 FROM tenants;
 
-INSERT INTO handoff_rules (tenant_id, name, trigger_type, trigger_value, priority, message_template)
+INSERT IGNORE INTO handoff_rules (tenant_id, name, trigger_type, trigger_value, priority, message_template)
 SELECT id, 'Negative Sentiment', 'sentiment', '-0.6', 80,
     'I understand your frustration. Let me connect you with someone who can help resolve this immediately.'
 FROM tenants;
 
-INSERT INTO handoff_rules (tenant_id, name, trigger_type, trigger_value, priority, message_template)
+INSERT IGNORE INTO handoff_rules (tenant_id, name, trigger_type, trigger_value, priority, message_template)
 SELECT id, 'Too Many Messages', 'message_count', '10', 70,
     'Let me connect you with a human agent who can provide more detailed assistance.'
 FROM tenants;

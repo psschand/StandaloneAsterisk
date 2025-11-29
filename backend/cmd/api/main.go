@@ -57,6 +57,13 @@ func main() {
 
 	log.Println("Database connected successfully")
 
+	// Run database migrations
+	log.Println("Running database migrations...")
+	if err := database.RunMigrations(db, cfg); err != nil {
+		log.Fatalf("Failed to run migrations: %v", err)
+	}
+	log.Println("Database migrations completed successfully")
+
 	// Initialize JWT service
 	jwtService := jwt.NewService(cfg.JWT.Secret, cfg.JWT.Expiration, cfg.JWT.RefreshExpiration)
 
@@ -164,6 +171,7 @@ func main() {
 	cdrService := service.NewCDRService(cdrRepo, userRepo)
 	agentStateService := service.NewAgentStateService(agentStateRepo, userRepo)
 	ticketService := service.NewTicketService(ticketRepo, ticketMessageRepo, contactRepo, userRepo)
+	contactService := service.NewContactService(contactRepo)
 	chatService := service.NewChatService(chatWidgetRepo, chatSessionRepo, chatMessageRepo, chatAgentRepo, chatTransferRepo, userRepo)
 	outboundRouteService := service.NewOutboundRouteService(outboundRouteRepo, endpointRepo)
 
@@ -196,6 +204,7 @@ func main() {
 	cdrHandler := handler.NewCDRHandler(cdrService)
 	agentStateHandler := handler.NewAgentStateHandler(agentStateService)
 	ticketHandler := handler.NewTicketHandler(ticketService)
+	contactHandler := handler.NewContactHandler(contactService)
 	chatHandler := handler.NewChatHandler(chatService, hub)
 	webhookHandler := handler.NewWebhookHandler(webhookRepo, webhookManager)
 	softphoneHandler := handler.NewSoftphoneHandler(endpointRepo, authRepo, userRepo, roleRepo)
@@ -472,6 +481,17 @@ func main() {
 			{
 				softphone.GET("/credentials", softphoneHandler.GetCredentials)
 				softphone.GET("/status", softphoneHandler.GetStatus)
+			}
+
+			// Contact routes
+			contacts := protected.Group("/contacts")
+			{
+				contacts.POST("", contactHandler.Create)
+				contacts.GET("", contactHandler.List)
+				contacts.GET("/phone", contactHandler.GetByPhone)
+				contacts.GET("/:id", contactHandler.Get)
+				contacts.PUT("/:id", contactHandler.Update)
+				contacts.DELETE("/:id", contactHandler.Delete)
 			}
 
 			// Extensions routes (SIP endpoints)

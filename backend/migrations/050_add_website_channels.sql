@@ -31,26 +31,21 @@ CREATE TABLE IF NOT EXISTS channel_connections (
     UNIQUE KEY unique_website_channel (website_id, channel_type, channel_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Step 2: Update chat_sessions to track channel source
+-- Step 2: Update chat_sessions to track channel source (skip if exists)
 ALTER TABLE chat_sessions 
-ADD COLUMN channel_connection_id BIGINT DEFAULT NULL COMMENT 'Which channel this conversation came from',
-ADD COLUMN website_id BIGINT DEFAULT NULL COMMENT 'Which website this conversation belongs to',
-ADD COLUMN channel_type VARCHAR(50) DEFAULT 'web' COMMENT 'web, whatsapp, facebook, etc.',
-ADD COLUMN channel_user_id VARCHAR(255) DEFAULT NULL COMMENT 'User ID from channel (WhatsApp number, FB ID, etc.)',
-ADD COLUMN channel_username VARCHAR(255) DEFAULT NULL COMMENT 'Display name from channel',
-ADD FOREIGN KEY (channel_connection_id) REFERENCES channel_connections(id) ON DELETE SET NULL,
-ADD FOREIGN KEY (website_id) REFERENCES websites(id) ON DELETE SET NULL,
-ADD INDEX idx_channel_connection (channel_connection_id),
-ADD INDEX idx_website (website_id),
-ADD INDEX idx_channel_type (channel_type);
+ADD COLUMN IF NOT EXISTS channel_connection_id BIGINT DEFAULT NULL COMMENT 'Which channel this conversation came from',
+ADD COLUMN IF NOT EXISTS website_id BIGINT DEFAULT NULL COMMENT 'Which website this conversation belongs to',
+ADD COLUMN IF NOT EXISTS channel_type VARCHAR(50) DEFAULT 'web' COMMENT 'web, whatsapp, facebook, etc.',
+ADD COLUMN IF NOT EXISTS channel_user_id VARCHAR(255) DEFAULT NULL COMMENT 'User ID from channel (WhatsApp number, FB ID, etc.)',
+ADD COLUMN IF NOT EXISTS channel_username VARCHAR(255) DEFAULT NULL COMMENT 'Display name from channel';
 
--- Step 3: Update chat_messages to include channel context
+-- Step 3: Update chat_messages to include channel context (skip if exists)
 ALTER TABLE chat_messages
-ADD COLUMN channel_message_id VARCHAR(255) DEFAULT NULL COMMENT 'Original message ID from channel',
-ADD COLUMN channel_metadata JSON COMMENT 'Channel-specific data (attachments, reactions, etc.)';
+ADD COLUMN IF NOT EXISTS channel_message_id VARCHAR(255) DEFAULT NULL COMMENT 'Original message ID from channel',
+ADD COLUMN IF NOT EXISTS channel_metadata JSON COMMENT 'Channel-specific data (attachments, reactions, etc.)';
 
 -- Step 4: Create web chat widget as a channel_connection (migrate existing widgets)
-INSERT INTO channel_connections (tenant_id, website_id, channel_type, channel_name, is_active, credentials, connection_status)
+INSERT IGNORE INTO channel_connections (tenant_id, website_id, channel_type, channel_name, is_active, credentials, connection_status)
 SELECT 
     cw.tenant_id,
     cw.website_id,
@@ -69,7 +64,7 @@ JOIN websites w ON w.id = cw.website_id
 WHERE cw.website_id IS NOT NULL;
 
 -- Step 5: Create sample social media connections for demo
-INSERT INTO channel_connections (tenant_id, website_id, channel_type, channel_name, is_active, credentials, connection_status, auto_respond)
+INSERT IGNORE INTO channel_connections (tenant_id, website_id, channel_type, channel_name, is_active, credentials, connection_status, auto_respond)
 SELECT 
     w.tenant_id,
     w.id as website_id,
@@ -88,7 +83,7 @@ FROM websites w
 WHERE w.tenant_id = 'demo-tenant'
 LIMIT 2;
 
-INSERT INTO channel_connections (tenant_id, website_id, channel_type, channel_name, is_active, credentials, connection_status, auto_respond)
+INSERT IGNORE INTO channel_connections (tenant_id, website_id, channel_type, channel_name, is_active, credentials, connection_status, auto_respond)
 SELECT 
     w.tenant_id,
     w.id as website_id,
@@ -108,7 +103,7 @@ FROM websites w
 WHERE w.tenant_id = 'demo-tenant'
 LIMIT 2;
 
-INSERT INTO channel_connections (tenant_id, website_id, channel_type, channel_name, is_active, credentials, connection_status)
+INSERT IGNORE INTO channel_connections (tenant_id, website_id, channel_type, channel_name, is_active, credentials, connection_status)
 SELECT 
     w.tenant_id,
     w.id as website_id,

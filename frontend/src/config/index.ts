@@ -50,6 +50,7 @@ export const config = {
       create: '/api/v1/contacts',
       update: (id: number) => `/api/v1/contacts/${id}`,
       delete: (id: number) => `/api/v1/contacts/${id}`,
+      getByPhone: (phone: string) => `/api/v1/contacts/phone?phone=${encodeURIComponent(phone)}`,
     },
     tickets: '/api/v1/tickets',
     chat: '/api/v1/chat',

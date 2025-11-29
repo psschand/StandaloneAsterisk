@@ -9,23 +9,34 @@ import {
   Phone, 
   Mail,
   Building2,
-  X
+  X,
+  Eye
 } from 'lucide-react';
 import apiClient from '../../lib/api';
 import config from '../../config';
+import ContactDetails from '../../components/contacts/ContactDetails';
 
 interface Contact {
   id: number;
-  first_name: string;
-  last_name: string;
-  email?: string;
+  tenant_id: string;
+  name: string;
+  email: string;
   phone?: string;
   company?: string;
-  job_title?: string;
-  notes?: string;
-  tags?: string[];
+  tags?: Record<string, any>;
+  custom_fields?: Record<string, any>;
   created_at: string;
   updated_at: string;
+}
+
+interface ContactFormData {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  company: string;
+  tags: Record<string, any>;
+  custom_fields: Record<string, any>;
 }
 
 export default function Contacts() {
@@ -33,29 +44,40 @@ export default function Contacts() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
+  const [viewingContactId, setViewingContactId] = useState<number | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [tagInput, setTagInput] = useState('');
+  const [customFieldKey, setCustomFieldKey] = useState('');
+  const [customFieldValue, setCustomFieldValue] = useState('');
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<ContactFormData>({
     first_name: '',
     last_name: '',
     email: '',
     phone: '',
     company: '',
-    job_title: '',
-    notes: '',
-    tags: [] as string[],
+    tags: {},
+    custom_fields: {},
   });
 
-  const { data: contacts = [], isLoading } = useQuery<Contact[]>({
-    queryKey: ['contacts', searchTerm],
+  const { data: contactsResponse, isLoading } = useQuery({
+    queryKey: ['contacts', searchTerm, currentPage],
     queryFn: async () => {
-      const params = searchTerm ? `?search=${searchTerm}` : '';
-      const response = await apiClient.get(`${config.api.contacts.list}${params}`);
-      return response.data.data || [];
+      const params = new URLSearchParams();
+      if (searchTerm) params.append('search', searchTerm);
+      params.append('page', currentPage.toString());
+      params.append('limit', '20');
+      
+      const response = await apiClient.get(`${config.api.contacts.list}?${params}`);
+      return response.data;
     },
   });
 
+  const contacts = contactsResponse?.data || [];
+  const meta = contactsResponse?.meta;
+
   const saveContactMutation = useMutation({
-    mutationFn: async (contact: Partial<Contact>) => {
+    mutationFn: async (contact: ContactFormData) => {
       if (editingContact) {
         return await apiClient.put(config.api.contacts.update(editingContact.id), contact);
       } else {
@@ -80,15 +102,19 @@ export default function Contacts() {
   const handleOpenModal = (contact?: Contact) => {
     if (contact) {
       setEditingContact(contact);
+      // Parse name into first and last
+      const nameParts = contact.name.split(' ');
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.slice(1).join(' ') || '';
+      
       setFormData({
-        first_name: contact.first_name,
-        last_name: contact.last_name,
+        first_name: firstName,
+        last_name: lastName,
         email: contact.email || '',
         phone: contact.phone || '',
         company: contact.company || '',
-        job_title: contact.job_title || '',
-        notes: contact.notes || '',
-        tags: contact.tags || [],
+        tags: contact.tags || {},
+        custom_fields: contact.custom_fields || {},
       });
     } else {
       setEditingContact(null);
@@ -98,9 +124,8 @@ export default function Contacts() {
         email: '',
         phone: '',
         company: '',
-        job_title: '',
-        notes: '',
-        tags: [],
+        tags: {},
+        custom_fields: {},
       });
     }
     setShowModal(true);
@@ -121,6 +146,39 @@ export default function Contacts() {
     if (confirm(`Call ${phone}?`)) {
       apiClient.post(config.api.calls.make, { number: phone });
     }
+  };
+
+  const addTag = (key: string, value: string) => {
+    if (key.trim()) {
+      setFormData({
+        ...formData,
+        tags: { ...formData.tags, [key]: value || true }
+      });
+      setTagInput('');
+    }
+  };
+
+  const removeTag = (key: string) => {
+    const newTags = { ...formData.tags };
+    delete newTags[key];
+    setFormData({ ...formData, tags: newTags });
+  };
+
+  const addCustomField = () => {
+    if (customFieldKey.trim()) {
+      setFormData({
+        ...formData,
+        custom_fields: { ...formData.custom_fields, [customFieldKey]: customFieldValue }
+      });
+      setCustomFieldKey('');
+      setCustomFieldValue('');
+    }
+  };
+
+  const removeCustomField = (key: string) => {
+    const newFields = { ...formData.custom_fields };
+    delete newFields[key];
+    setFormData({ ...formData, custom_fields: newFields });
   };
 
   return (
@@ -162,7 +220,7 @@ export default function Contacts() {
             <div>
               <p className="text-sm text-gray-600">With Phone</p>
               <p className="text-2xl font-bold text-gray-900">
-                {contacts.filter(c => c.phone).length}
+                {contacts.filter((c: Contact) => c.phone).length}
               </p>
             </div>
           </div>
@@ -176,7 +234,7 @@ export default function Contacts() {
             <div>
               <p className="text-sm text-gray-600">With Email</p>
               <p className="text-2xl font-bold text-gray-900">
-                {contacts.filter(c => c.email).length}
+                {contacts.filter((c: Contact) => c.email).length}
               </p>
             </div>
           </div>
@@ -215,25 +273,32 @@ export default function Contacts() {
             </button>
           </div>
         ) : (
-          contacts.map((contact) => (
+          contacts.map((contact: Contact) => (
             <div key={contact.id} className="card hover:shadow-lg transition-shadow">
               <div className="flex items-start justify-between mb-4">
                 <div className="flex items-center space-x-3">
                   <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center">
                     <span className="text-primary-600 font-semibold text-lg">
-                      {contact.first_name[0]}{contact.last_name[0]}
+                      {contact.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
                     </span>
                   </div>
                   <div>
                     <h3 className="font-semibold text-gray-900">
-                      {contact.first_name} {contact.last_name}
+                      {contact.name}
                     </h3>
-                    {contact.job_title && (
-                      <p className="text-sm text-gray-500">{contact.job_title}</p>
+                    {contact.company && (
+                      <p className="text-sm text-gray-500">{contact.company}</p>
                     )}
                   </div>
                 </div>
                 <div className="flex items-center space-x-1">
+                  <button
+                    onClick={() => setViewingContactId(contact.id)}
+                    className="p-1 text-gray-400 hover:text-primary-600"
+                    title="View Details"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
                   <button
                     onClick={() => handleOpenModal(contact)}
                     className="p-1 text-gray-400 hover:text-primary-600"
@@ -280,35 +345,67 @@ export default function Contacts() {
                 {contact.email && (
                   <div className="flex items-center text-sm text-gray-600">
                     <Mail className="w-4 h-4 mr-2" />
-                    <a href={`mailto:${contact.email}`} className="hover:text-primary-600">
+                    <a href={`mailto:${contact.email}`} className="hover:text-primary-600 truncate">
                       {contact.email}
                     </a>
                   </div>
                 )}
 
-                {contact.tags && contact.tags.length > 0 && (
+                {contact.tags && Object.keys(contact.tags).length > 0 && (
                   <div className="flex items-center flex-wrap gap-1 mt-2">
-                    {contact.tags.map((tag, index) => (
+                    {Object.entries(contact.tags).map(([key, value]) => (
                       <span
-                        key={index}
+                        key={key}
                         className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs"
+                        title={typeof value === 'boolean' ? key : `${key}: ${value}`}
                       >
-                        {tag}
+                        {key}
                       </span>
                     ))}
                   </div>
                 )}
 
-                {contact.notes && (
-                  <p className="text-sm text-gray-500 mt-2 line-clamp-2">
-                    {contact.notes}
-                  </p>
+                {contact.custom_fields && Object.keys(contact.custom_fields).length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-gray-100">
+                    {Object.entries(contact.custom_fields).slice(0, 2).map(([key, value]) => (
+                      <div key={key} className="text-xs text-gray-500">
+                        <span className="font-medium">{key}:</span> {String(value)}
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
           ))
         )}
       </div>
+
+      {/* Pagination */}
+      {meta && meta.total_pages > 1 && (
+        <div className="card">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-gray-600">
+              Page {meta.page} of {meta.total_pages} ({meta.total_count} total contacts)
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="btn-secondary disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(meta.total_pages, p + 1))}
+                disabled={currentPage === meta.total_pages}
+                className="btn-secondary disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add/Edit Contact Modal */}
       {showModal && (
@@ -365,14 +462,18 @@ export default function Contacts() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Phone
+                    Primary Phone
                   </label>
                   <input
                     type="tel"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     className="input"
+                    placeholder="+1234567890"
                   />
+                  <p className="mt-1 text-xs text-gray-500">
+                    💡 Tip: Add additional phone numbers using Custom Fields below (e.g., "Mobile", "Work Phone", "Home Phone")
+                  </p>
                 </div>
 
                 <div>
@@ -386,31 +487,114 @@ export default function Contacts() {
                     className="input"
                   />
                 </div>
+              </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Job Title
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.job_title}
-                    onChange={(e) => setFormData({ ...formData, job_title: e.target.value })}
-                    className="input"
-                  />
+              {/* Tags Section */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Tags
+                </label>
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addTag(tagInput, '');
+                        }
+                      }}
+                      placeholder="Add tag (e.g., VIP, Customer, etc.)"
+                      className="input flex-1"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => addTag(tagInput, '')}
+                      className="btn-secondary"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  {Object.keys(formData.tags).length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(formData.tags).map(([key]) => (
+                        <span
+                          key={key}
+                          className="inline-flex items-center px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
+                        >
+                          {key}
+                          <button
+                            type="button"
+                            onClick={() => removeTag(key)}
+                            className="ml-2 text-blue-600 hover:text-blue-800"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
+              {/* Custom Fields Section */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Notes
+                  Custom Fields
                 </label>
-                <textarea
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  className="input"
-                  rows={3}
-                  placeholder="Add any notes about this contact..."
-                />
+                <p className="text-xs text-gray-600 mb-2">
+                  📱 Examples: Add "Mobile", "Work Phone", "Home Phone" for additional phone numbers, 
+                  or any other custom data like "Department", "Account ID", "Preferred Contact Time", etc.
+                </p>
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={customFieldKey}
+                      onChange={(e) => setCustomFieldKey(e.target.value)}
+                      placeholder="Field name"
+                      className="input flex-1"
+                    />
+                    <input
+                      type="text"
+                      value={customFieldValue}
+                      onChange={(e) => setCustomFieldValue(e.target.value)}
+                      placeholder="Field value"
+                      className="input flex-1"
+                    />
+                    <button
+                      type="button"
+                      onClick={addCustomField}
+                      className="btn-secondary"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  {Object.keys(formData.custom_fields).length > 0 && (
+                    <div className="space-y-1">
+                      {Object.entries(formData.custom_fields).map(([key, value]) => (
+                        <div
+                          key={key}
+                          className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded"
+                        >
+                          <div className="flex-1">
+                            <span className="font-medium text-sm">{key}:</span>
+                            <span className="text-sm text-gray-600 ml-2">{String(value)}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeCustomField(key)}
+                            className="text-gray-400 hover:text-red-600"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
@@ -432,6 +616,21 @@ export default function Contacts() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Contact Details Modal */}
+      {viewingContactId && (
+        <ContactDetails
+          contactId={viewingContactId}
+          onClose={() => setViewingContactId(null)}
+          onEdit={() => {
+            const contact = contacts?.data?.find((c: Contact) => c.id === viewingContactId);
+            if (contact) {
+              handleOpenModal(contact);
+              setViewingContactId(null);
+            }
+          }}
+        />
       )}
     </div>
   );

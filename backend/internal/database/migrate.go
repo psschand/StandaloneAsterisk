@@ -2,7 +2,11 @@ package database
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/psschand/callcenter/internal/config"
 	"gorm.io/gorm"
@@ -42,11 +46,21 @@ func RunMigrations(db *gorm.DB, cfg *config.Config) error {
 
 		fmt.Printf("Running migration %d: %s\n", migration.ID, migration.Name)
 
-		// Execute migration in a transaction
+		// Execute migration - split by semicolons for multiple statements
+		statements := splitSQLStatements(migration.SQL)
+
+		// Execute in a transaction
 		if err := db.Transaction(func(tx *gorm.DB) error {
-			// Execute SQL
-			if err := tx.Exec(migration.SQL).Error; err != nil {
-				return fmt.Errorf("failed to execute migration: %w", err)
+			// Execute each statement separately
+			for i, stmt := range statements {
+				stmt = strings.TrimSpace(stmt)
+				if stmt == "" {
+					continue
+				}
+
+				if err := tx.Exec(stmt).Error; err != nil {
+					return fmt.Errorf("failed to execute statement %d: %w\nSQL: %s", i+1, err, stmt[:min(len(stmt), 200)])
+				}
 			}
 
 			// Record migration
@@ -97,16 +111,47 @@ func getAppliedMigrations(db *gorm.DB) (map[int]bool, error) {
 
 // getMigrationFiles returns all migration files sorted by ID
 func getMigrationFiles(cfg *config.Config) ([]Migration, error) {
-	// For now, return empty slice
-	// Migration files will be loaded from the migrations directory
-	// This is a placeholder that will be implemented with actual file reading
+	// Get migrations directory path - use hardcoded path for now
+	migrationsDir := "./migrations"
 
-	// TODO: Implement file-based migrations loading
-	// migrations := []Migration{}
-	// files, err := filepath.Glob("migrations/*.sql")
-	// ... parse and sort files
+	// Read all SQL files from migrations directory
+	pattern := filepath.Join(migrationsDir, "*.sql")
+	files, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read migration files: %w", err)
+	}
 
-	return []Migration{}, nil
+	if len(files) == 0 {
+		return []Migration{}, nil
+	}
+
+	migrations := make([]Migration, 0, len(files))
+	for _, file := range files {
+		id, name, err := parseMigrationFilename(file)
+		if err != nil {
+			fmt.Printf("Warning: Skipping invalid migration file %s: %v\n", file, err)
+			continue
+		}
+
+		// Read SQL content
+		content, err := os.ReadFile(file)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read migration file %s: %w", file, err)
+		}
+
+		migrations = append(migrations, Migration{
+			ID:   id,
+			Name: name,
+			SQL:  string(content),
+		})
+	}
+
+	// Sort migrations by ID
+	sort.Slice(migrations, func(i, j int) bool {
+		return migrations[i].ID < migrations[j].ID
+	})
+
+	return migrations, nil
 }
 
 // RollbackLastMigration rolls back the most recent migration
@@ -159,10 +204,116 @@ func GetMigrationStatus(db *gorm.DB) ([]map[string]interface{}, error) {
 }
 
 // Helper function to parse migration filename
-// Expected format: 001_migration_name.sql
+// Expected format: 001_migration_name.sql or 001-migration-name.sql
 func parseMigrationFilename(filename string) (int, string, error) {
 	base := filepath.Base(filename)
-	// This is a simplified parser
-	// TODO: Implement proper parsing logic
-	return 0, base, nil
+
+	// Remove .sql extension
+	name := base
+	if len(name) > 4 && name[len(name)-4:] == ".sql" {
+		name = name[:len(name)-4]
+	}
+
+	// Find first separator (_ or -)
+	var separator string
+
+	if underscoreIdx := strings.Index(name, "_"); underscoreIdx > 0 {
+		separator = "_"
+	} else if dashIdx := strings.Index(name, "-"); dashIdx > 0 {
+		separator = "-"
+	} else {
+		return 0, "", fmt.Errorf("invalid migration filename format (expected: NNN_name.sql or NNN-name.sql)")
+	}
+
+	parts := strings.SplitN(name, separator, 2)
+	if len(parts) != 2 {
+		return 0, "", fmt.Errorf("invalid migration filename format")
+	}
+
+	// Parse ID
+	parsedID, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid migration ID: %w", err)
+	}
+
+	migrationName := parts[1]
+	if migrationName == "" {
+		return 0, "", fmt.Errorf("migration name cannot be empty")
+	}
+
+	return parsedID, migrationName, nil
+}
+
+// splitSQLStatements splits a SQL string into individual statements
+// Handles semicolons within quotes and comments
+func splitSQLStatements(sql string) []string {
+	var statements []string
+	var current strings.Builder
+	inSingleQuote := false
+	inDoubleQuote := false
+	inComment := false
+
+	lines := strings.Split(sql, "\n")
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Skip empty lines and comment-only lines
+		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+			continue
+		}
+
+		// Track quote state for the line
+		for i := 0; i < len(line); i++ {
+			ch := line[i]
+
+			// Handle comments
+			if i < len(line)-1 && line[i:i+2] == "--" && !inSingleQuote && !inDoubleQuote {
+				inComment = true
+			}
+
+			// Handle quotes
+			if ch == '\'' && !inDoubleQuote && !inComment {
+				inSingleQuote = !inSingleQuote
+			}
+			if ch == '"' && !inSingleQuote && !inComment {
+				inDoubleQuote = !inDoubleQuote
+			}
+
+			// Handle statement separators
+			if ch == ';' && !inSingleQuote && !inDoubleQuote && !inComment {
+				// End of statement
+				stmt := strings.TrimSpace(current.String())
+				if stmt != "" {
+					statements = append(statements, stmt)
+				}
+				current.Reset()
+				continue
+			}
+
+			if !inComment {
+				current.WriteByte(ch)
+			}
+		}
+
+		// Reset comment flag at end of line
+		inComment = false
+		current.WriteString("\n")
+	}
+
+	// Add final statement if exists
+	final := strings.TrimSpace(current.String())
+	if final != "" {
+		statements = append(statements, final)
+	}
+
+	return statements
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

@@ -1,0 +1,28 @@
+-- Create channel_integrations table
+CREATE TABLE IF NOT EXISTS `channel_integrations` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `tenant_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `channel` enum('whatsapp','facebook','instagram','twitter','telegram','web','sms') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `name` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `credentials` json NOT NULL,
+  `webhook_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `webhook_secret` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `verify_token` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `phone_number` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `page_id` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `is_active` tinyint(1) DEFAULT '1',
+  `is_bot_enabled` tinyint(1) DEFAULT '1',
+  `welcome_message` text COLLATE utf8mb4_unicode_ci,
+  `offline_message` text COLLATE utf8mb4_unicode_ci,
+  `business_hours` json DEFAULT NULL,
+  `last_sync_at` timestamp NULL DEFAULT NULL,
+  `last_message_at` timestamp NULL DEFAULT NULL,
+  `message_count` int DEFAULT '0',
+  `error_log` text COLLATE utf8mb4_unicode_ci,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_tenant_channel` (`tenant_id`,`channel`,`phone_number`),
+  KEY `idx_active` (`is_active`),
+  CONSTRAINT `channel_integrations_ibfk_1` FOREIGN KEY (`tenant_id`) REFERENCES `tenants` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

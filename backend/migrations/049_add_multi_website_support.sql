@@ -1,10 +1,18 @@
 -- Migration 030: Add Multi-Website Support with Tenant Domain Mode
 -- This migration adds flexible single/multi-domain support per tenant
 
--- Step 1: Add domain mode configuration to tenants
-ALTER TABLE tenants 
-ADD COLUMN domain_mode ENUM('single', 'multiple') DEFAULT 'multiple' COMMENT 'single=one website only, multiple=unlimited websites',
-ADD COLUMN max_websites INT DEFAULT NULL COMMENT 'NULL = unlimited, number = max websites allowed';
+-- Step 1: Add domain mode configuration to tenants (check if exists first - MySQL doesn't support IF NOT EXISTS in ALTER)
+-- Skip if column already exists
+SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE table_schema = DATABASE() AND table_name = 'tenants' AND column_name = 'domain_mode');
+
+SET @sql = IF(@col_exists = 0, 
+    'ALTER TABLE tenants ADD COLUMN domain_mode ENUM(\'single\', \'multiple\') DEFAULT \'multiple\' COMMENT \'single=one website only, multiple=unlimited websites\', ADD COLUMN max_websites INT DEFAULT NULL COMMENT \'NULL = unlimited, number = max websites allowed\'',
+    'SELECT "domain_mode column already exists" AS message');
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- Step 2: Create websites table for organizing tenant web properties
 CREATE TABLE IF NOT EXISTS websites (
@@ -21,28 +29,22 @@ CREATE TABLE IF NOT EXISTS websites (
     INDEX idx_domain (domain)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Step 3: Enhance AI Agent Config for profiles
+-- Step 3: Enhance AI Agent Config for profiles (skip if exists)
 ALTER TABLE ai_agent_config 
-ADD COLUMN profile_name VARCHAR(100) NOT NULL DEFAULT 'Default Profile',
-ADD COLUMN description TEXT,
-ADD COLUMN website_id BIGINT DEFAULT NULL COMMENT 'Link profile to specific website (optional)',
-ADD COLUMN is_default BOOLEAN DEFAULT FALSE COMMENT 'Default profile for tenant',
-ADD COLUMN kb_tags JSON COMMENT 'Array of tags to filter knowledge base articles',
-ADD FOREIGN KEY (website_id) REFERENCES websites(id) ON DELETE SET NULL,
-ADD INDEX idx_tenant_profile (tenant_id, is_default);
+ADD COLUMN IF NOT EXISTS profile_name VARCHAR(100) NOT NULL DEFAULT 'Default Profile',
+ADD COLUMN IF NOT EXISTS description TEXT,
+ADD COLUMN IF NOT EXISTS website_id BIGINT DEFAULT NULL COMMENT 'Link profile to specific website (optional)',
+ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT FALSE COMMENT 'Default profile for tenant',
+ADD COLUMN IF NOT EXISTS kb_tags JSON COMMENT 'Array of tags to filter knowledge base articles';
 
--- Step 4: Link chat widgets to websites and AI profiles
+-- Step 4: Link chat widgets to websites and AI profiles (skip if exists)
 ALTER TABLE chat_widgets
-ADD COLUMN website_id BIGINT DEFAULT NULL COMMENT 'Website this widget belongs to',
-ADD COLUMN ai_agent_profile_id BIGINT DEFAULT NULL COMMENT 'AI profile to use for this widget',
-ADD FOREIGN KEY (website_id) REFERENCES websites(id) ON DELETE CASCADE,
-ADD FOREIGN KEY (ai_agent_profile_id) REFERENCES ai_agent_config(id) ON DELETE SET NULL,
-ADD INDEX idx_website (website_id),
-ADD INDEX idx_ai_profile (ai_agent_profile_id);
+ADD COLUMN IF NOT EXISTS website_id BIGINT DEFAULT NULL COMMENT 'Website this widget belongs to',
+ADD COLUMN IF NOT EXISTS ai_agent_profile_id BIGINT DEFAULT NULL COMMENT 'AI profile to use for this widget';
 
--- Step 5: Add tags support to knowledge base
+-- Step 5: Add tags support to knowledge base (skip if exists)
 ALTER TABLE knowledge_base 
-ADD COLUMN tags JSON COMMENT 'Array of tags for filtering: ["products", "shipping", "returns"]';
+ADD COLUMN IF NOT EXISTS tags JSON COMMENT 'Array of tags for filtering: ["products", "shipping", "returns"]';
 
 -- Step 6: Migrate existing data (set demo-tenant as multiple domain mode)
 UPDATE tenants 
@@ -50,7 +52,7 @@ SET domain_mode = 'multiple', max_websites = NULL
 WHERE id = 'demo-tenant';
 
 -- Step 7: Create default website for existing tenant
-INSERT INTO websites (tenant_id, name, domain, description, is_active)
+INSERT IGNORE INTO websites (tenant_id, name, domain, description, is_active)
 SELECT 
     id as tenant_id,
     CONCAT(name, ' - Main Website') as name,

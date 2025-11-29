@@ -231,20 +231,22 @@ func (ts *TicketSLA) GetResolutionTimeHours() float64 {
 // Contact represents a contact in the helpdesk system
 // @Description Customer contact information
 type Contact struct {
-	ID        int64          `gorm:"column:id;primaryKey;autoIncrement" json:"id" example:"1"`
-	TenantID  string         `gorm:"column:tenant_id;type:varchar(64);not null;index:idx_tenant" json:"tenant_id" example:"acme-corp"`
-	Name      string         `gorm:"column:name;type:varchar(255);not null" json:"name" example:"Jane Customer"`
-	Email     string         `gorm:"column:email;type:varchar(255);not null;uniqueIndex:idx_tenant_email" json:"email" example:"jane@customer.com"`
-	Phone     *string        `gorm:"column:phone;type:varchar(20)" json:"phone,omitempty" example:"+15551234567"`
-	Company   *string        `gorm:"column:company;type:varchar(255)" json:"company,omitempty" example:"Customer Corp"`
-	Timezone  *string        `gorm:"column:timezone;type:varchar(50)" json:"timezone,omitempty" example:"America/New_York"`
-	Language  *string        `gorm:"column:language;type:varchar(10)" json:"language,omitempty" example:"en"`
-	Notes     *string        `gorm:"column:notes;type:text" json:"notes,omitempty"`
-	Metadata  common.JSONMap `gorm:"column:metadata;type:json" json:"metadata,omitempty"`
-	IsActive  bool           `gorm:"column:is_active;default:true" json:"is_active" example:"true"`
-	CreatedAt time.Time      `gorm:"column:created_at;autoCreateTime;index:idx_created" json:"created_at"`
-	UpdatedAt time.Time      `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
-	DeletedAt *time.Time     `gorm:"column:deleted_at;index" json:"deleted_at,omitempty"`
+	ID           int64          `gorm:"column:id;primaryKey;autoIncrement" json:"id" example:"1"`
+	TenantID     string         `gorm:"column:tenant_id;type:varchar(64);not null;index:idx_tenant" json:"tenant_id" example:"acme-corp"`
+	Name         string         `gorm:"column:name;type:varchar(255);not null" json:"name" example:"Jane Customer"`
+	Email        string         `gorm:"column:email;type:varchar(255);not null;uniqueIndex:idx_tenant_email" json:"email" example:"jane@customer.com"`
+	Phone        *string        `gorm:"column:phone;type:varchar(20)" json:"phone,omitempty" example:"+15551234567"`
+	Company      *string        `gorm:"column:company;type:varchar(255)" json:"company,omitempty" example:"Customer Corp"`
+	Tags         common.JSONMap `gorm:"column:tags;type:json" json:"tags,omitempty"`
+	CustomFields common.JSONMap `gorm:"column:custom_fields;type:json" json:"custom_fields,omitempty"`
+	Timezone     *string        `gorm:"column:timezone;type:varchar(50)" json:"timezone,omitempty" example:"America/New_York"`
+	Language     *string        `gorm:"column:language;type:varchar(10)" json:"language,omitempty" example:"en"`
+	Notes        *string        `gorm:"column:notes;type:text" json:"notes,omitempty"`
+	Metadata     common.JSONMap `gorm:"column:metadata;type:json" json:"metadata,omitempty"`
+	IsActive     bool           `gorm:"column:is_active;default:true" json:"is_active" example:"true"`
+	CreatedAt    time.Time      `gorm:"column:created_at;autoCreateTime;index:idx_created" json:"created_at"`
+	UpdatedAt    time.Time      `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+	DeletedAt    *time.Time     `gorm:"column:deleted_at;index" json:"deleted_at,omitempty"`
 
 	// Relations
 	Tenant  *core.Tenant `gorm:"foreignKey:TenantID" json:"tenant,omitempty"`

@@ -1,0 +1,28 @@
+-- Create ps_transports table for PJSIP transport configuration
+CREATE TABLE IF NOT EXISTS `ps_transports` (
+  `id` varchar(128) NOT NULL,
+  `protocol` enum('udp','tcp','tls','ws','wss') DEFAULT 'udp',
+  `bind` varchar(128) DEFAULT NULL,
+  `async_operations` int DEFAULT '1',
+  `ca_list_file` varchar(256) DEFAULT NULL,
+  `ca_list_path` varchar(256) DEFAULT NULL,
+  `cert_file` varchar(256) DEFAULT NULL,
+  `cipher` varchar(256) DEFAULT NULL,
+  `domain` varchar(128) DEFAULT NULL,
+  `external_media_address` varchar(128) DEFAULT NULL,
+  `external_signaling_address` varchar(128) DEFAULT NULL,
+  `external_signaling_port` int DEFAULT NULL,
+  `method` enum('default','unspecified','tlsv1','sslv2','sslv3','sslv23') DEFAULT 'default',
+  `local_net` varchar(256) DEFAULT NULL,
+  `password` varchar(128) DEFAULT NULL,
+  `priv_key_file` varchar(256) DEFAULT NULL,
+  `require_client_cert` enum('yes','no') DEFAULT 'no',
+  `verify_client` enum('yes','no') DEFAULT 'no',
+  `verify_server` enum('yes','no') DEFAULT 'no',
+  `tos` int DEFAULT NULL,
+  `cos` int DEFAULT NULL,
+  `allow_reload` enum('yes','no') DEFAULT 'no',
+  `symmetric_transport` enum('yes','no') DEFAULT 'no',
+  `websocket_write_timeout` int DEFAULT '100',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

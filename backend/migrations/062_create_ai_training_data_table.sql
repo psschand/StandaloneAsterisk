@@ -1,0 +1,25 @@
+-- Create ai_training_data table for storing AI chat training data
+CREATE TABLE IF NOT EXISTS `ai_training_data` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `tenant_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `website_id` bigint DEFAULT NULL,
+  `session_id` bigint NOT NULL,
+  `message_id` bigint DEFAULT NULL,
+  `question` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `answer` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `rating` int DEFAULT NULL,
+  `was_helpful` tinyint(1) DEFAULT NULL,
+  `feedback_comment` text COLLATE utf8mb4_unicode_ci,
+  `context_tags` json DEFAULT NULL,
+  `conversation_metadata` json DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_tenant_website` (`tenant_id`,`website_id`),
+  KEY `idx_learning` (`tenant_id`,`website_id`,`rating`),
+  KEY `idx_session` (`session_id`),
+  KEY `website_id` (`website_id`),
+  FULLTEXT KEY `idx_question` (`question`),
+  CONSTRAINT `ai_training_data_ibfk_1` FOREIGN KEY (`tenant_id`) REFERENCES `tenants` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `ai_training_data_ibfk_2` FOREIGN KEY (`website_id`) REFERENCES `websites` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `ai_training_data_ibfk_3` FOREIGN KEY (`session_id`) REFERENCES `chat_sessions` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -2,4 +2,4 @@
 -- Description: Store additional configuration data for queues
 
 ALTER TABLE queues
-    ADD COLUMN metadata JSON NULL AFTER status;
+    ADD COLUMN IF NOT EXISTS metadata JSON NULL AFTER status;

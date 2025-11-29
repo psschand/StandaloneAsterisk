@@ -11,6 +11,6 @@ CREATE TABLE IF NOT EXISTS ps_endpoint_id_ips (
 
 -- Add identification records for extensions 100 and 101
 -- These allow registration based on username matching
-INSERT INTO ps_endpoint_id_ips (id, endpoint, `match`) VALUES
+INSERT IGNORE INTO ps_endpoint_id_ips (id, endpoint, `match`) VALUES
 ('100-identify', '100', '100'),
 ('101-identify', '101', '101');

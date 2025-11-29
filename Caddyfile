@@ -107,3 +107,19 @@ app.soham.top:8443 {
 		format json
 	}
 }
+
+# Postal Mail Server
+postal.soham.top {
+	reverse_proxy postal-web-1:5000 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto https
+	}
+
+	# Logs
+	log {
+		output stdout
+		format json
+	}
+}
