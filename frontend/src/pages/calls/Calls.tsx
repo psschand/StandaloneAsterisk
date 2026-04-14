@@ -4,17 +4,14 @@ import {
   Phone, 
   PhoneCall, 
   PhoneOff, 
-  Pause, 
-  Play, 
-  PhoneForwarded,
+  Pause,
   Clock,
   Plus,
-  Mic,
-  MicOff,
   User
 } from 'lucide-react';
 import apiClient from '../../lib/api';
 import config from '../../config';
+import { useSoftphone } from '../../contexts/SoftphoneContext';
 
 interface Call {
   id: string;
@@ -30,11 +27,11 @@ interface Call {
 
 export default function Calls() {
   const queryClient = useQueryClient();
+  const { makeCall } = useSoftphone();
   const [showMakeCall, setShowMakeCall] = useState(false);
   const [callNumber, setCallNumber] = useState('');
   const [selectedCall, setSelectedCall] = useState<string | null>(null);
   const [callNotes, setCallNotes] = useState<Record<string, string>>({});
-  const [muted, setMuted] = useState<Record<string, boolean>>({});
 
   // Fetch active calls
   const { data: calls = [], isLoading } = useQuery<Call[]>({
@@ -46,28 +43,6 @@ export default function Calls() {
     refetchInterval: 2000, // Refresh every 2 seconds for real-time updates
   });
 
-  // Make call mutation
-  const makeCallMutation = useMutation({
-    mutationFn: async (number: string) => {
-      return await apiClient.post(config.api.calls.make, { number });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['calls'] });
-      setShowMakeCall(false);
-      setCallNumber('');
-    },
-  });
-
-  // Answer call mutation
-  const answerMutation = useMutation({
-    mutationFn: async (callId: string) => {
-      return await apiClient.post(config.api.calls.answer(callId));
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['calls'] });
-    },
-  });
-
   // Hangup call mutation
   const hangupMutation = useMutation({
     mutationFn: async (callId: string) => {
@@ -75,36 +50,6 @@ export default function Calls() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['calls'] });
-    },
-  });
-
-  // Hold/Resume call mutation
-  const holdMutation = useMutation({
-    mutationFn: async ({ callId, hold }: { callId: string; hold: boolean }) => {
-      return await apiClient.post(config.api.calls.hold(callId), { hold });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['calls'] });
-    },
-  });
-
-  // Transfer call mutation
-  const transferMutation = useMutation({
-    mutationFn: async ({ callId, destination }: { callId: string; destination: string }) => {
-      return await apiClient.post(config.api.calls.transfer(callId), { destination });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['calls'] });
-    },
-  });
-
-  // Mute/Unmute call mutation
-  const muteMutation = useMutation({
-    mutationFn: async ({ callId, mute }: { callId: string; mute: boolean }) => {
-      return await apiClient.post(config.api.calls.mute(callId), { mute });
-    },
-    onSuccess: (_, variables) => {
-      setMuted({ ...muted, [variables.callId]: variables.mute });
     },
   });
 
@@ -129,6 +74,15 @@ export default function Calls() {
       transferring: 'bg-blue-100 text-blue-800',
     };
     return colors[status as keyof typeof colors] || 'bg-gray-100 text-gray-800';
+  };
+
+  const handleMakeCall = () => {
+    const number = callNumber.trim();
+    if (!number) return;
+
+    makeCall(number);
+    setShowMakeCall(false);
+    setCallNumber('');
   };
 
   return (
@@ -249,7 +203,11 @@ export default function Calls() {
                       <div className="flex items-center space-x-4 text-sm text-gray-600">
                         <span className="flex items-center space-x-1">
                           <User className="w-4 h-4" />
-                          <span>{call.direction === 'inbound' ? 'From' : 'To'}: {call.direction === 'inbound' ? call.caller_id : call.callee_id}</span>
+                          <span>From: {call.caller_id}</span>
+                        </span>
+
+                        <span className="flex items-center space-x-1">
+                          <span>To: {call.callee_id}</span>
                         </span>
                         
                         <span className="flex items-center space-x-1">
@@ -281,66 +239,6 @@ export default function Calls() {
 
                   {/* Call Controls */}
                   <div className="flex items-center space-x-2">
-                    {/* Answer (if ringing) */}
-                    {call.status === 'ringing' && (
-                      <button
-                        onClick={() => answerMutation.mutate(call.id)}
-                        className="p-2 bg-green-500 hover:bg-green-600 text-white rounded-lg transition-colors"
-                        title="Answer"
-                      >
-                        <PhoneCall className="w-5 h-5" />
-                      </button>
-                    )}
-
-                    {/* Mute/Unmute */}
-                    {call.status === 'answered' && (
-                      <button
-                        onClick={() => muteMutation.mutate({ callId: call.id, mute: !muted[call.id] })}
-                        className={`p-2 rounded-lg transition-colors ${
-                          muted[call.id]
-                            ? 'bg-red-500 hover:bg-red-600 text-white'
-                            : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
-                        }`}
-                        title={muted[call.id] ? 'Unmute' : 'Mute'}
-                      >
-                        {muted[call.id] ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-                      </button>
-                    )}
-
-                    {/* Hold/Resume */}
-                    {call.status !== 'ringing' && (
-                      <button
-                        onClick={() => holdMutation.mutate({ 
-                          callId: call.id, 
-                          hold: call.status !== 'on-hold' 
-                        })}
-                        className={`p-2 rounded-lg transition-colors ${
-                          call.status === 'on-hold'
-                            ? 'bg-green-500 hover:bg-green-600 text-white'
-                            : 'bg-orange-500 hover:bg-orange-600 text-white'
-                        }`}
-                        title={call.status === 'on-hold' ? 'Resume' : 'Hold'}
-                      >
-                        {call.status === 'on-hold' ? <Play className="w-5 h-5" /> : <Pause className="w-5 h-5" />}
-                      </button>
-                    )}
-
-                    {/* Transfer */}
-                    {call.status === 'answered' && (
-                      <button
-                        onClick={() => {
-                          const destination = prompt('Enter transfer destination:');
-                          if (destination) {
-                            transferMutation.mutate({ callId: call.id, destination });
-                          }
-                        }}
-                        className="p-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors"
-                        title="Transfer"
-                      >
-                        <PhoneForwarded className="w-5 h-5" />
-                      </button>
-                    )}
-
                     {/* Hangup */}
                     <button
                       onClick={() => hangupMutation.mutate(call.id)}
@@ -398,12 +296,12 @@ export default function Calls() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => makeCallMutation.mutate(callNumber)}
-                  disabled={!callNumber || makeCallMutation.isPending}
+                  onClick={handleMakeCall}
+                  disabled={!callNumber.trim()}
                   className="btn-primary flex items-center space-x-2"
                 >
                   <Phone className="w-5 h-5" />
-                  <span>{makeCallMutation.isPending ? 'Calling...' : 'Call'}</span>
+                  <span>Call</span>
                 </button>
               </div>
             </div>

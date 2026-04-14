@@ -135,6 +135,7 @@ export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
       // Create audio element for remote audio
       const audioElement = document.createElement('audio');
       audioElement.autoplay = true;
+      audioElement.setAttribute('playsinline', 'true');
       remoteAudioRef.current = audioElement;
 
       // Initialize AudioContext for ringtone
@@ -167,6 +168,17 @@ export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
           }
         },
         delegate: {
+          onConnect: () => {
+            console.log('[Softphone] Transport connected');
+          },
+          onDisconnect: (error) => {
+            console.warn('[Softphone] Transport disconnected', error);
+            setIsRegistered(false);
+            if (sessionRef.current?.state !== SessionState.Established) {
+              sessionRef.current = null;
+              setCallStatus('idle');
+            }
+          },
           onInvite: (invitation) => {
             console.log('[Softphone] === Incoming Call Debug ===');
             console.log('[Softphone] Remote Identity:', invitation.remoteIdentity);
@@ -247,7 +259,7 @@ export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
               status: 'ringing',
             });
             sessionRef.current = invitation;
-            playRingtone();
+            void playRingtone();
 
             invitation.stateChange.addListener((state) => {
               if (state === SessionState.Terminated) {
@@ -312,8 +324,10 @@ export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
     }
   }, [volume]);
 
-  const playRingtone = () => {
+  const playRingtone = async () => {
     if (!audioContextRef.current) return;
+
+    await resumeAudioContext();
 
     stopRingtone();
 
@@ -348,6 +362,52 @@ export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
     ringtoneIntervalRef.current = window.setInterval(playTone, 4000);
   };
 
+  const resumeAudioContext = async () => {
+    if (audioContextRef.current?.state === 'suspended') {
+      try {
+        await audioContextRef.current.resume();
+      } catch (error) {
+        console.warn('[Softphone] Failed to resume audio context', error);
+      }
+    }
+  };
+
+  const playOutgoingRingback = async () => {
+    if (!audioContextRef.current) return;
+
+    await resumeAudioContext();
+    stopRingtone();
+
+    const context = audioContextRef.current;
+    const gainNode = context.createGain();
+    gainNode.gain.value = 0.18;
+    gainNode.connect(context.destination);
+    ringtoneGainRef.current = gainNode;
+
+    const playBurst = () => {
+      const oscillator1 = context.createOscillator();
+      const oscillator2 = context.createOscillator();
+
+      oscillator1.frequency.value = 440;
+      oscillator2.frequency.value = 480;
+
+      oscillator1.connect(gainNode);
+      oscillator2.connect(gainNode);
+
+      oscillator1.start();
+      oscillator2.start();
+      ringtoneOscillatorRef.current = [oscillator1, oscillator2];
+
+      setTimeout(() => {
+        oscillator1.stop();
+        oscillator2.stop();
+      }, 1500);
+    };
+
+    playBurst();
+    ringtoneIntervalRef.current = window.setInterval(playBurst, 4000);
+  };
+
   const stopRingtone = () => {
     ringtoneOscillatorRef.current.forEach(osc => {
       try {
@@ -364,6 +424,45 @@ export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
     }
   };
 
+  const attachRemoteMedia = (session: Session) => {
+    const peerConnection = (session as any).sessionDescriptionHandler?.peerConnection as RTCPeerConnection | undefined;
+    if (!peerConnection) {
+      return;
+    }
+
+    const syncRemoteAudio = () => {
+      const remoteTracks = peerConnection
+        .getReceivers()
+        .map((receiver) => receiver.track)
+        .filter((track): track is MediaStreamTrack => Boolean(track) && track.kind === 'audio');
+
+      if (!remoteTracks.length || !remoteAudioRef.current) {
+        return;
+      }
+
+      remoteAudioRef.current.srcObject = new MediaStream(remoteTracks);
+      void remoteAudioRef.current.play().catch((error) => {
+        console.warn('[Softphone] Unable to autoplay remote audio', error);
+      });
+    };
+
+    peerConnection.ontrack = () => {
+      syncRemoteAudio();
+    };
+
+    syncRemoteAudio();
+  };
+
+  const ensureRegistered = async () => {
+    if (!registererRef.current) {
+      throw new Error('Softphone is not initialized yet');
+    }
+
+    if (!isRegistered) {
+      await registererRef.current.register();
+    }
+  };
+
   const cleanupMedia = () => {
     if (remoteAudioRef.current) {
       remoteAudioRef.current.pause();
@@ -376,6 +475,8 @@ export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
     if (!userAgentRef.current || !number) return;
 
     try {
+      await resumeAudioContext();
+
       // Request microphone permission first
       console.log('[Softphone] Requesting microphone permission...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -391,6 +492,8 @@ export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
         return;
       }
 
+      await ensureRegistered();
+
       console.log('[Softphone] Making call to:', number, 'URI:', target.toString());
 
       const inviter = new Inviter(userAgentRef.current, target, {
@@ -403,15 +506,14 @@ export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
       sessionRef.current = inviter;
       setPhoneNumber(number);
       setCallStatus('ringing');
+      void playOutgoingRingback();
 
       inviter.stateChange.addListener((state) => {
         console.log('[Softphone] Call state changed to:', state);
         if (state === SessionState.Established) {
+          stopRingtone();
           setCallStatus('connected');
-          const mediaStream = (inviter.sessionDescriptionHandler as any)?.peerConnection?.getRemoteStreams()[0];
-          if (mediaStream && remoteAudioRef.current) {
-            remoteAudioRef.current.srcObject = mediaStream;
-          }
+          attachRemoteMedia(inviter);
         } else if (state === SessionState.Terminated) {
           setCallStatus('idle');
           setPhoneNumber('');
@@ -459,6 +561,7 @@ export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
   const answer = () => {
     if (!sessionRef.current || !(sessionRef.current instanceof Invitation)) return;
 
+    void resumeAudioContext();
     stopRingtone();
     setIncomingCall(null);
     setCallStatus('connected');
@@ -470,10 +573,7 @@ export const SoftphoneProvider: React.FC<Props> = ({ children }) => {
       },
       extraHeaders: ['Session-Expires: 0']
     }).then(() => {
-      const mediaStream = (invitation.sessionDescriptionHandler as any)?.peerConnection?.getRemoteStreams()[0];
-      if (mediaStream && remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = mediaStream;
-      }
+      attachRemoteMedia(invitation);
     });
 
     invitation.stateChange.addListener((state) => {

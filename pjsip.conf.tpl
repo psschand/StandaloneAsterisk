@@ -19,7 +19,8 @@ allow_reload=yes
 [twilio_trunk]
 type=aor
 contact=sip:${TWILIO_SIP_DOMAIN}:5060
-qualify_frequency=60
+; Twilio does not respond to OPTIONS pings - disable qualification to keep contact Available
+qualify_frequency=0
 
 [twilio_trunk]
 type=endpoint
@@ -41,7 +42,15 @@ t38_udptl=no
 [twilio_trunk]
 type=identify
 endpoint=twilio_trunk
-match=${TWILIO_IPS}
+; Twilio Ashburn/Virginia edge (54.172.60.0/23 = .60.x + .61.x)
+match=54.172.60.0/24
+match=54.172.61.0/24
+; Twilio Oregon edge
+match=54.244.51.0/24
+; Twilio global edges (Dublin, Frankfurt, Sao Paulo)
+match=54.171.127.192/26
+match=35.156.191.128/25
+match=177.71.206.192/26
 
 [twilio_auth]
 type=auth

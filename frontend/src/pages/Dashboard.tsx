@@ -5,44 +5,77 @@ import apiClient from '../lib/api';
 import type { DashboardStats, Call, Agent } from '../types';
 import { Phone, Users, Clock, TrendingUp, PhoneIncoming, PhoneOutgoing } from 'lucide-react';
 
+interface AgentStateResponse {
+  id: number;
+  endpoint_id?: string;
+  state: 'available' | 'busy' | 'away' | 'break' | 'offline' | 'dnd' | string;
+}
+
 export default function Dashboard() {
   const { stats, setStats, activeCalls, setActiveCalls, agents, setAgents } = useCallCenterStore();
-
-  // Fetch dashboard stats
-  const { data: statsData } = useQuery({
-    queryKey: ['dashboard-stats'],
-    queryFn: async () => {
-      const response = await apiClient.get<DashboardStats>('/api/v1/dashboard/stats');
-      return response.data;
-    },
-    refetchInterval: 5000, // Refresh every 5 seconds
-  });
 
   // Fetch active calls
   const { data: callsData } = useQuery({
     queryKey: ['active-calls'],
     queryFn: async () => {
-      const response = await apiClient.get<Call[]>('/api/v1/calls/active');
-      return response.data;
+      const response = await apiClient.get<{ data?: Call[] }>('/api/v1/calls/active');
+      return response.data.data || [];
     },
     refetchInterval: 3000,
   });
 
   // Fetch agents
-  const { data: agentsData } = useQuery({
-    queryKey: ['agents'],
+  const { data: agentStatesData } = useQuery({
+    queryKey: ['agent-state'],
     queryFn: async () => {
-      const response = await apiClient.get<Agent[]>('/api/v1/agents');
-      return response.data;
+      const response = await apiClient.get<{ data?: AgentStateResponse[] }>('/api/v1/agent-state');
+      return response.data.data || [];
     },
     refetchInterval: 5000,
   });
 
   useEffect(() => {
-    if (statsData) setStats(statsData);
+    if (!agentStatesData) return;
+
+    const mappedAgents: Agent[] = agentStatesData.map((agentState) => ({
+      id: Number(agentState.id),
+      user_id: Number(agentState.id),
+      extension: agentState.endpoint_id || String(agentState.id),
+      status: agentState.state,
+      last_status_change: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }));
+
+    setAgents(mappedAgents);
+  }, [agentStatesData, setAgents]);
+
+  useEffect(() => {
     if (callsData) setActiveCalls(callsData);
-    if (agentsData) setAgents(agentsData);
-  }, [statsData, callsData, agentsData, setStats, setActiveCalls, setAgents]);
+  }, [callsData, setActiveCalls]);
+
+  useEffect(() => {
+    const connectedCalls = activeCalls.filter((call) => call.status === 'answered').length;
+    const availableAgents = agents.filter((agent) => agent.status === 'available').length;
+
+    const derivedStats: DashboardStats = {
+      active_calls: activeCalls.length,
+      waiting_calls: Math.max(activeCalls.length - connectedCalls, 0),
+      available_agents: availableAgents,
+      total_agents: agents.length,
+      calls_today: activeCalls.length,
+      answered_calls_today: connectedCalls,
+      average_wait_time: 0,
+      average_call_duration:
+        activeCalls.length > 0
+          ? Math.round(
+              activeCalls.reduce((sum, call) => sum + (call.duration || 0), 0) / activeCalls.length
+            )
+          : 0,
+    };
+
+    setStats(derivedStats);
+  }, [activeCalls, agents, setStats]);
 
   const statCards = [
     {

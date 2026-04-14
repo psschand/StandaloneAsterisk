@@ -1,11 +1,46 @@
 package asterisk
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
+
+// ARITime parses ARI timestamps in multiple formats used by different Asterisk builds.
+type ARITime struct {
+	time.Time
+}
+
+func (t *ARITime) UnmarshalJSON(data []byte) error {
+	raw := strings.Trim(string(data), "\"")
+	if raw == "" || raw == "null" {
+		t.Time = time.Time{}
+		return nil
+	}
+
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05.999-0700",
+		"2006-01-02T15:04:05.000-0700",
+		"2006-01-02T15:04:05-0700",
+	}
+
+	for _, layout := range layouts {
+		parsed, err := time.Parse(layout, raw)
+		if err == nil {
+			t.Time = parsed
+			return nil
+		}
+	}
+
+	return fmt.Errorf("unsupported ARI timestamp format: %s", raw)
+}
 
 // ARIEvent represents an event from Asterisk ARI
 type ARIEvent struct {
 	Type        string                 `json:"type"`
-	Timestamp   time.Time              `json:"timestamp"`
+	Timestamp   ARITime                `json:"timestamp"`
 	Application string                 `json:"application,omitempty"`
 	Channel     *Channel               `json:"channel,omitempty"`
 	Playback    *Playback              `json:"playback,omitempty"`
@@ -24,7 +59,7 @@ type Channel struct {
 	Connected    CallerID          `json:"connected"`
 	AccountCode  string            `json:"accountcode"`
 	Dialplan     DialplanCEP       `json:"dialplan"`
-	CreationTime time.Time         `json:"creationtime"`
+	CreationTime ARITime           `json:"creationtime"`
 	Language     string            `json:"language"`
 	ChannelVars  map[string]string `json:"channelvars,omitempty"`
 }
@@ -46,14 +81,14 @@ type DialplanCEP struct {
 
 // Bridge represents an ARI bridge
 type Bridge struct {
-	ID           string    `json:"id"`
-	Technology   string    `json:"technology"`
-	BridgeType   string    `json:"bridge_type"`
-	BridgeClass  string    `json:"bridge_class"`
-	Creator      string    `json:"creator"`
-	Name         string    `json:"name"`
-	Channels     []string  `json:"channels"`
-	CreationTime time.Time `json:"creationtime"`
+	ID           string   `json:"id"`
+	Technology   string   `json:"technology"`
+	BridgeType   string   `json:"bridge_type"`
+	BridgeClass  string   `json:"bridge_class"`
+	Creator      string   `json:"creator"`
+	Name         string   `json:"name"`
+	Channels     []string `json:"channels"`
+	CreationTime ARITime  `json:"creationtime"`
 }
 
 // Playback represents a media playback

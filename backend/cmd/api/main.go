@@ -207,6 +207,7 @@ func main() {
 	contactHandler := handler.NewContactHandler(contactService)
 	chatHandler := handler.NewChatHandler(chatService, hub)
 	webhookHandler := handler.NewWebhookHandler(webhookRepo, webhookManager)
+	callAPIHandler := handler.NewCallHandler(ariClient)
 	softphoneHandler := handler.NewSoftphoneHandler(endpointRepo, authRepo, userRepo, roleRepo)
 	endpointIdIpRepo := repository.NewPsEndpointIdIpRepository(db)
 	endpointHandler := handler.NewEndpointHandler(endpointRepo, authRepo, aorRepo, endpointIdIpRepo)
@@ -377,6 +378,13 @@ func main() {
 				cdr.GET("/call-volume", cdrHandler.GetCallVolume)
 				cdr.POST("/:id/transcribe", transcriptionHandler.TranscribeCDR)
 				cdr.POST("/transcribe/all", transcriptionHandler.TranscribeAllPending)
+			}
+
+			// Call routes
+			calls := protected.Group("/calls")
+			{
+				calls.GET("/active", callAPIHandler.ListActive)
+				calls.POST("/:id/hangup", callAPIHandler.Hangup)
 			}
 
 			// Agent state routes

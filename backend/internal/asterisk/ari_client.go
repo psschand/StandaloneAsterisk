@@ -178,6 +178,27 @@ func (c *ARIClient) HangupChannel(channelID string) error {
 	return nil
 }
 
+// ListChannels returns all live channels visible to ARI.
+func (c *ARIClient) ListChannels() ([]Channel, error) {
+	resp, err := c.makeRequest("GET", "/ari/channels", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("failed to list channels: %s - %s", resp.Status, string(body))
+	}
+
+	var channels []Channel
+	if err := json.NewDecoder(resp.Body).Decode(&channels); err != nil {
+		return nil, err
+	}
+
+	return channels, nil
+}
+
 // DialEndpoint dials an endpoint
 func (c *ARIClient) DialEndpoint(endpoint, extension, callerID string) (*Channel, error) {
 	resp, err := c.makeRequest("POST",
