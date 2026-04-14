@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   Phone, 
   Settings as SettingsIcon,
@@ -8,7 +9,9 @@ import {
   CheckCircle,
   Smartphone,
   Info,
-  Minimize2
+  Minimize2,
+  History,
+  Search
 } from 'lucide-react';
 import { useSoftphone } from '../../contexts/SoftphoneContext';
 
@@ -34,9 +37,11 @@ const formatDuration = (seconds: number): string => {
 };
 
 export default function Softphone() {
+  const navigate = useNavigate();
   const [showSettings, setShowSettings] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [contactLookup, setContactLookup] = useState('');
 
   const {
     isRegistered,
@@ -76,6 +81,15 @@ export default function Softphone() {
     navigator.clipboard.writeText(text);
     setCopiedField(field);
     setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const openCallHistory = () => {
+    navigate('/cdrs');
+  };
+
+  const openContactSearch = () => {
+    const query = contactLookup.trim();
+    navigate(query ? `/contacts?search=${encodeURIComponent(query)}` : '/contacts');
   };
 
   if (!credentials) {
@@ -350,6 +364,43 @@ export default function Softphone() {
                   </div>
                 </button>
               ))}
+            </div>
+
+            <div className="mt-6 pt-4 border-t border-blue-200">
+              <h4 className="text-sm font-semibold text-gray-900 mb-3">Quick Tools</h4>
+
+              <button
+                onClick={openCallHistory}
+                className="w-full mb-3 text-left p-3 bg-white rounded-lg hover:shadow-md transition-all border border-gray-200 group"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">Call History</div>
+                    <div className="text-xs text-gray-500">Open active and recent call view</div>
+                  </div>
+                  <History className="w-4 h-4 text-gray-400 group-hover:text-blue-600" />
+                </div>
+              </button>
+
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-gray-700">Search Contacts</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={contactLookup}
+                    onChange={(e) => setContactLookup(e.target.value)}
+                    placeholder="Name, phone, or company"
+                    className="input text-sm"
+                  />
+                  <button
+                    onClick={openContactSearch}
+                    className="px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                    title="Search Contacts"
+                  >
+                    <Search className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

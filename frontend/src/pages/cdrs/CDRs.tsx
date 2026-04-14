@@ -39,7 +39,23 @@ interface CDR {
   transcription_status?: string;
 }
 
+interface CDRMeta {
+  page?: number;
+  page_size?: number;
+  total_pages?: number;
+  total_count?: number;
+}
+
+interface CDRListResponse {
+  data?: CDR[];
+  meta?: CDRMeta;
+}
+
+type DirectionCategory = 'inbound' | 'outbound' | 'internal-inbound' | 'internal-outbound';
+
 export default function CDRs() {
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 50;
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -147,23 +163,99 @@ export default function CDRs() {
     }
   };
 
-  const { data: cdrs = [], isLoading } = useQuery<CDR[]>({
-    queryKey: ['cdrs', searchTerm, dateFrom, dateTo, directionFilter, dispositionFilter],
+  const { data: cdrResponse, isLoading } = useQuery<CDRListResponse>({
+    queryKey: ['cdrs', currentPage, pageSize, searchTerm, dateFrom, dateTo, directionFilter, dispositionFilter],
     queryFn: async () => {
       const params: Record<string, string> = {};
+      params.page = String(currentPage);
+      params.page_size = String(pageSize);
       if (dateFrom) params.start_date = dateFrom;
       if (dateTo) params.end_date = dateTo;
       if (dispositionFilter) params.disposition = dispositionFilter;
+      if (directionFilter) params.direction = directionFilter;
       if (searchTerm) params.search = searchTerm;
 
       const response = await apiClient.get(config.api.cdrs.list, { params });
-      return response.data.data || [];
+      return response.data;
     },
+  });
+
+  const cdrs = cdrResponse?.data || [];
+  const meta = cdrResponse?.meta;
+
+  const isLikelyInternalNumber = (value?: string) => {
+    const clean = (value || '').trim();
+    return /^[0-9]{2,6}$/.test(clean);
+  };
+
+  const isLikelyExternalNumber = (value?: string) => {
+    const clean = (value || '').trim();
+    if (!clean) return false;
+    if (clean.startsWith('+')) return true;
+    return /^\d{7,}$/.test(clean);
+  };
+
+  const classifyDirection = (cdr: CDR): DirectionCategory => {
+    const raw = (cdr.direction || '').toLowerCase().trim();
+    const src = cdr.src || '';
+    const dst = cdr.dst || '';
+
+    const srcInternal = isLikelyInternalNumber(src);
+    const dstInternal = isLikelyInternalNumber(dst);
+    const srcExternal = isLikelyExternalNumber(src);
+    const dstExternal = isLikelyExternalNumber(dst);
+
+    // Number-pattern truth should take priority over legacy/raw DB direction values.
+    if (dstExternal && !dstInternal) {
+      return 'outbound';
+    }
+    if (srcExternal && dstInternal) {
+      return 'inbound';
+    }
+
+    // Internal extension-to-extension traffic.
+    if (srcInternal && dstInternal) {
+      if (raw === 'inbound') {
+        return 'internal-inbound';
+      }
+      return 'internal-outbound';
+    }
+
+    // Respect explicit inbound/outbound when patterns are ambiguous.
+    if (raw === 'inbound') return 'inbound';
+    if (raw === 'outbound') return 'outbound';
+
+    // Internal call legs fallback.
+    if (raw === 'internal') {
+      if (srcInternal && !dstInternal) {
+        return 'internal-outbound';
+      }
+      if (!srcInternal && dstInternal) {
+        return 'internal-inbound';
+      }
+      return 'outbound';
+    }
+
+    // Fallback classification when direction is missing.
+    if (srcExternal && dstInternal) {
+      return 'inbound';
+    }
+    if (srcInternal && dstExternal) {
+      return 'outbound';
+    }
+    return 'internal-outbound';
+  };
+
+  const filteredCdrs = cdrs.filter((cdr) => {
+    if (directionFilter && classifyDirection(cdr) !== directionFilter) {
+      return false;
+    }
+    return true;
   });
 
   const exportToCSV = () => {
     const headers = ['ID', 'Date', 'From', 'To', 'Duration', 'Disposition', 'Queue', 'Agent'];
-    const rows = cdrs.map(cdr => [
+    const rows = filteredCdrs.map(cdr => [
       cdr.id,
       new Date(cdr.calldate).toLocaleString(),
       cdr.src,
@@ -210,7 +302,7 @@ export default function CDRs() {
   const getDirectionIcon = (cdr: CDR) => {
     // Use the direction field if available, otherwise infer from src/dst
     if (cdr.direction) {
-      return cdr.direction.toLowerCase() === 'inbound' ? (
+      return classifyDirection(cdr).includes('inbound') ? (
         <PhoneIncoming className="w-4 h-4 text-green-600" />
       ) : (
         <PhoneOutgoing className="w-4 h-4 text-blue-600" />
@@ -226,16 +318,16 @@ export default function CDRs() {
   };
 
   const stats = {
-    total: cdrs.length,
-    answered: cdrs.filter(c => c.disposition === 'ANSWERED').length,
-    missed: cdrs.filter(c => c.disposition === 'NO ANSWER').length,
-    avgDuration: cdrs.length > 0 
-      ? Math.round(cdrs.reduce((acc, c) => acc + c.duration, 0) / cdrs.length)
+    total: filteredCdrs.length,
+    answered: filteredCdrs.filter(c => c.disposition === 'ANSWERED').length,
+    missed: filteredCdrs.filter(c => c.disposition === 'NO ANSWER').length,
+    avgDuration: filteredCdrs.length > 0 
+      ? Math.round(filteredCdrs.reduce((acc, c) => acc + c.duration, 0) / filteredCdrs.length)
       : 0,
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0 overflow-x-hidden">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -304,8 +396,8 @@ export default function CDRs() {
 
       {/* Filters */}
       <div className="card">
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-          <div className="md:col-span-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+          <div className="lg:col-span-2">
             <label className="block text-sm font-medium text-gray-700 mb-2">
               <Search className="w-4 h-4 inline mr-1" />
               Search
@@ -358,101 +450,62 @@ export default function CDRs() {
               <option value="">All</option>
               <option value="inbound">Inbound</option>
               <option value="outbound">Outbound</option>
+              <option value="internal-inbound">Internal-Inbound</option>
+              <option value="internal-outbound">Internal-Outbound</option>
             </select>
           </div>
-        </div>
 
-        <div className="mt-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            <Filter className="w-4 h-4 inline mr-1" />
-            Disposition
-          </label>
-          <div className="flex items-center space-x-4">
-            <label className="flex items-center">
-              <input
-                type="radio"
-                value=""
-                checked={dispositionFilter === ''}
-                onChange={(e) => setDispositionFilter(e.target.value)}
-                className="mr-2"
-              />
-              All
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              <Filter className="w-4 h-4 inline mr-1" />
+              Disposition
             </label>
-            <label className="flex items-center">
-              <input
-                type="radio"
-                value="ANSWERED"
-                checked={dispositionFilter === 'ANSWERED'}
-                onChange={(e) => setDispositionFilter(e.target.value)}
-                className="mr-2"
-              />
-              Answered
-            </label>
-            <label className="flex items-center">
-              <input
-                type="radio"
-                value="NO ANSWER"
-                checked={dispositionFilter === 'NO ANSWER'}
-                onChange={(e) => setDispositionFilter(e.target.value)}
-                className="mr-2"
-              />
-              No Answer
-            </label>
-            <label className="flex items-center">
-              <input
-                type="radio"
-                value="BUSY"
-                checked={dispositionFilter === 'BUSY'}
-                onChange={(e) => setDispositionFilter(e.target.value)}
-                className="mr-2"
-              />
-              Busy
-            </label>
-            <label className="flex items-center">
-              <input
-                type="radio"
-                value="FAILED"
-                checked={dispositionFilter === 'FAILED'}
-                onChange={(e) => setDispositionFilter(e.target.value)}
-                className="mr-2"
-              />
-              Failed
-            </label>
+            <select
+              value={dispositionFilter}
+              onChange={(e) => setDispositionFilter(e.target.value)}
+              className="input"
+            >
+              <option value="">All</option>
+              <option value="ANSWERED">Answered</option>
+              <option value="NO ANSWER">No Answer</option>
+              <option value="BUSY">Busy</option>
+              <option value="FAILED">Failed</option>
+            </select>
           </div>
         </div>
       </div>
 
       {/* CDR Table */}
       <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
+        <div className="w-full overflow-x-auto">
+          <table className="w-full table-fixed">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-10">
                   
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
                   Direction
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-40">
                   Caller
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-40">
                   Callee
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-36">
                   Start Time
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
                   Duration
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
                   Disposition
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
                   Queue/Agent
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
                   Recording
                 </th>
               </tr>
@@ -460,21 +513,21 @@ export default function CDRs() {
             <tbody className="bg-white divide-y divide-gray-200">
               {isLoading ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
                     Loading call records...
                   </td>
                 </tr>
-              ) : cdrs.length === 0 ? (
+              ) : filteredCdrs.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={9} className="px-6 py-8 text-center text-gray-500">
                     No call records found
                   </td>
                 </tr>
               ) : (
-                cdrs.map((cdr) => (
+                filteredCdrs.map((cdr) => (
                   <>
                     <tr key={cdr.id} className="hover:bg-gray-50 border-b border-gray-200">
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 py-4 align-top">
                         {cdr.recordingfile && (
                           <button
                             onClick={() => toggleRow(cdr.id)}
@@ -488,36 +541,36 @@ export default function CDRs() {
                           </button>
                         )}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 py-4 align-top">
                         <div className="flex items-center space-x-2">
                           {getDirectionIcon(cdr)}
-                          <span className="text-sm">{cdr.direction || (cdr.src && cdr.src.length < 5 ? 'Outbound' : 'Inbound')}</span>
+                          <span className="text-sm capitalize">{classifyDirection(cdr)}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td className="px-3 py-4 align-top text-sm text-gray-900 break-all">
                         {cdr.src || 'N/A'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td className="px-3 py-4 align-top text-sm text-gray-900 break-all">
                         {cdr.dst || 'N/A'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <td className="px-3 py-4 align-top text-sm text-gray-500 break-words">
                         {new Date(cdr.calldate).toLocaleString()}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td className="px-3 py-4 align-top text-sm text-gray-900">
                         {formatDuration(cdr.duration)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 py-4 align-top">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${getDispositionColor(cdr.disposition || 'UNKNOWN')}`}>
                           {cdr.disposition || 'UNKNOWN'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <td className="px-3 py-4 align-top text-sm text-gray-500 break-words">
                         {cdr.queue_name && <div>Q: {cdr.queue_name}</div>}
                         {cdr.agent_name && <div>A: {cdr.agent_name}</div>}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 py-4 align-top">
                         {cdr.recordingfile ? (
-                          <div className="flex flex-col gap-2 min-w-[200px]">
+                          <div className="flex flex-col gap-2">
                             <div className="flex items-center gap-2">
                               {playingAudio === cdr.id ? (
                                 <button
@@ -583,7 +636,7 @@ export default function CDRs() {
                                 <button
                                   onClick={() => handleTranscribe(cdr.id)}
                                   disabled={transcribingIds.has(cdr.id)}
-                                  className="btn btn-primary inline-flex items-center gap-2"
+                                  className="btn-primary inline-flex items-center gap-2"
                                 >
                                   {transcribingIds.has(cdr.id) ? (
                                     <>
@@ -626,7 +679,7 @@ export default function CDRs() {
                                     <button
                                       onClick={() => handleTranscribe(cdr.id)}
                                       disabled={transcribingIds.has(cdr.id)}
-                                      className="btn btn-sm bg-purple-600 hover:bg-purple-700 text-white inline-flex items-center gap-2"
+                                      className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm inline-flex items-center gap-2 transition-colors"
                                     >
                                       {transcribingIds.has(cdr.id) ? (
                                         <>
@@ -666,6 +719,32 @@ export default function CDRs() {
           </table>
         </div>
       </div>
+
+      {(meta?.total_pages || 0) > 1 && (
+        <div className="card">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-gray-600">
+              Page {meta?.page || currentPage} of {meta?.total_pages || 1} ({meta?.total_count || 0} records)
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={(meta?.page || currentPage) <= 1}
+                className="btn-secondary disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(meta?.total_pages || p, p + 1))}
+                disabled={(meta?.page || currentPage) >= (meta?.total_pages || currentPage)}
+                className="btn-secondary disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

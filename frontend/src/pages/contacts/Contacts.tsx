@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   UserCircle, 
@@ -40,8 +41,10 @@ interface ContactFormData {
 }
 
 export default function Contacts() {
+  const [searchParams] = useSearchParams();
+  const initialSearch = searchParams.get('search')?.trim() || '';
   const queryClient = useQueryClient();
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(initialSearch);
   const [showModal, setShowModal] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [viewingContactId, setViewingContactId] = useState<number | null>(null);
