@@ -121,6 +121,21 @@ This document summarizes the telephony, backend, and frontend fixes implemented 
 - `frontend/public/pwa-icon-192.png`
 - `frontend/public/pwa-icon-512.png`
 
+## 8) No Audio in Calls (RTP Path / Echo Test)
+
+### Problem
+- Call signaling connected successfully but media was not heard during echo test (one-way/no audio symptom).
+
+### Fixes
+- Ensured WebRTC remote media is attached using modern track handling (`getReceivers` + `ontrack`) instead of deprecated remote stream access.
+- Added audio context resume handling so browser playback is not blocked by autoplay policy after call setup.
+- Added explicit Asterisk media address configuration (`external_media_address`) for transport/media path consistency in containerized deployment.
+- Added local ringback behavior improvements to separate ringing UX from connected-call media issues.
+
+### Files
+- `frontend/src/contexts/SoftphoneContext.tsx`
+- `docker/asterisk/config/pjsip.conf`
+
 ## Validation Summary
 - Active calls endpoint now serves data with ARI timestamp tolerance.
 - Calls page supports active call view and hangup with cleaner behavior.
