@@ -1,8 +1,8 @@
 # SIP Registration Debugging & Fix Guide
 
 **Date**: April 15, 2026  
-**Symptom**: Zoiper / Linphone displayed "408 Request Timeout" or "IOError" when attempting to register  
-**Resolution**: Four independent root causes identified and fixed  
+**Symptom**: Zoiper / Linphone displayed "408 Request Timeout" or "IOError" when attempting to register; web softphone showed WebSocket error 1006; TLS registration failed  
+**Resolution**: Six independent root causes identified and fixed  
 
 ---
 
@@ -14,11 +14,13 @@
 4. [Fix 2 — Endpoint deny/permit ACL Columns](#4-fix-2--endpoint-denypermit-acl-columns)
 5. [Fix 3 — res_pjsip_acl.so BASELINE ACL](#5-fix-3--res_pjsip_aclso-baseline-acl)
 6. [Fix 4 — Spurious pjsip copy.conf](#6-fix-4--spurious-pjsip-copyconf)
-7. [ARA Database Tables — Current State](#7-ara-database-tables--current-state)
-8. [Python SIP Registration Test Tool](#8-python-sip-registration-test-tool)
-9. [Quick Validation Checklist](#9-quick-validation-checklist)
-10. [Adding New Extensions](#10-adding-new-extensions)
-11. [Files Changed Summary](#11-files-changed-summary)
+7. [Fix 5 — Web Softphone WebSocket Wrong Port](#7-fix-5--web-softphone-websocket-wrong-port)
+8. [Fix 6 — TLS Transport Missing Certificate](#8-fix-6--tls-transport-missing-certificate)
+9. [ARA Database Tables — Current State](#9-ara-database-tables--current-state)
+10. [Python SIP Registration Test Tool](#10-python-sip-registration-test-tool)
+11. [Quick Validation Checklist](#11-quick-validation-checklist)
+12. [Adding New Extensions](#12-adding-new-extensions)
+13. [Files Changed Summary](#13-files-changed-summary)
 
 ---
 
@@ -74,7 +76,9 @@ Four separate issues **all had to be fixed** for registration to succeed. They w
 | Initial | `408 Request Timeout` | Firewall REJECT rule before SIP ACCEPT |
 | After firewall fix | `Not match Endpoint ACL` (BASELINE) | `res_pjsip_acl.so` BASELINE ACL active |
 | After disabling ACL module | `Not match Endpoint ACL` (still) | `deny/permit` columns on `ps_endpoints` |
-| After clearing deny/permit | `SIP/2.0 200 OK` | **Fixed** |
+| After clearing deny/permit | `SIP/2.0 200 OK` | **Native SIP fixed** |
+| Web softphone | `WebSocket closed ... code: 1006` | Backend returned UDP/5060; browser built wrong WSS URL |
+| TLS transport | SSL handshake failure / no response | `ps_transports` had NULL `cert_file`/`priv_key_file` |
 
 ---
 
@@ -224,11 +228,184 @@ git rm "docker/asterisk/config/pjsip copy.conf"
 
 ---
 
-## 7. ARA Database Tables — Current State
+## 9. Fix 5 — Web Softphone WebSocket Wrong Port
+
+### Problem
+
+The browser-based SIP.js web softphone was showing **WebSocket error 1006** (abnormal close) and going offline:
+
+```
+WebSocket closed wss://138-2-68-107.sslip.io:5060/ws (code: 1006)
+```
+
+The URL was wrong in two ways: wrong domain (`sslip.io` instead of `app.soham.top`) and wrong port (`:5060` instead of no port, i.e. 443).
+
+**Root cause — chain of events:**
+
+1. All user extensions have `transport=transport-udp` in `ps_endpoints` (correct — native SIP clients like Zoiper use UDP)
+2. `softphone_handler.go` was reading the endpoint's `transport` field and returning matching credentials:
+   ```json
+   { "transport": "UDP", "port": 5060, "proxy": "app.soham.top" }
+   ```
+3. `SoftphoneContext.tsx` built the WebSocket URL as:
+   ```js
+   const server = `wss://${credentials.proxy}:${credentials.port}/ws`;
+   // → wss://app.soham.top:5060/ws  ← WRONG port
+   ```
+4. Port 5060 is a raw SIP port — it has **no HTTP/WebSocket listener**. The TCP connection would either be refused or return a malformed HTTP response → WebSocket code 1006
+
+**The correct path for the web softphone:**
+```
+Browser → wss://app.soham.top/ws  (port 443, implicit)
+          Caddy (handle /ws { reverse_proxy asterisk:8088 })
+          Asterisk transport-ws (0.0.0.0:8088, protocol=ws)
+```
+
+Browsers **cannot** use raw UDP or TCP SIP. They must use WebSocket (WS/WSS). The `transport` column in `ps_endpoints` only controls which Asterisk-side transport handles *native SIP clients*. The browser softphone always needs WSS via Caddy.
+
+### Fix Applied
+
+Simplified `backend/internal/handler/softphone_handler.go` — removed the 50-line transport-switch block and always return WSS/443:
+
+```go
+// BEFORE: switch block returning UDP/5060, TCP/5060, TLS/5061, WS/443
+//         based on endpoint.Transport from ps_endpoints
+
+// AFTER: always WSS/443 — browser cannot use raw SIP
+transport     := "WSS"
+credentialPort := 443
+proxy          := domain  // "app.soham.top"
+```
+
+Now `SoftphoneContext.tsx` correctly builds:
+```
+wss://app.soham.top/ws   ← port 443 implicit, no ":443" suffix appended
+```
+
+Caddy's existing `/ws` route proxies it to `asterisk:8088` (confirmed working: `HTTP 101 Switching Protocols`).
+
+### Verified State
+
+```bash
+# Test Caddy → Asterisk WS upgrade from inside Docker network
+docker exec caddy wget -S -O/dev/null \
+  --header='Upgrade: websocket' \
+  --header='Connection: Upgrade' \
+  --header='Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  --header='Sec-WebSocket-Version: 13' \
+  --header='Sec-WebSocket-Protocol: sip' \
+  http://asterisk:8088/ws
+# Expected: HTTP/1.1 101 Switching Protocols  ← WebSocket upgrade OK
+```
+
+**Migration/commit:** `069578d` — Fix: web softphone always returns WSS/443 credentials via Caddy proxy
+
+---
+
+## 8. Fix 6 — TLS Transport Missing Certificate
+
+### Problem
+
+TLS registration on port 5061 failed with SSL handshake errors even though:
+- Port 5061 was open in the firewall (`iptables -S INPUT | grep 5061` → ACCEPT)
+- `pjsip show transports` showed `transport-tls` as loaded
+- Certificate files existed at `/etc/asterisk/keys/asterisk.crt` and `.key`
+
+Inspecting the running transport revealed the certificate fields were **empty**:
+
+```
+docker exec asterisk asterisk -rx "pjsip show transport transport-tls"
+  cert_file     :        ← empty!
+  priv_key_file :        ← empty!
+```
+
+**Root cause: `sorcery.conf` maps transports to the database, not to `pjsip.conf`**
+
+```ini
+# docker/asterisk/config/sorcery.conf
+[res_pjsip]
+transport = realtime,ps_transports   ← transports come from MySQL, NOT pjsip.conf
+```
+
+The `[transport-tls]` section in `pjsip.conf` is **silently ignored** because Asterisk uses the DB as the authoritative source. The `ps_transports` row for `transport-tls` had `NULL` for both `cert_file` and `priv_key_file`:
+
+```sql
+SELECT id, protocol, cert_file, priv_key_file FROM ps_transports;
+-- transport-tls  tls  NULL  NULL  ← no cert!
+```
+
+Asterisk loaded a TLS listener with no certificate → any TLS client negotiation immediately failed.
+
+### Certificate Details
+
+The self-signed certificate was pre-generated and present in the container:
+
+```
+Subject: CN=asterisk  (self-signed)
+Issuer:  CN=asterisk
+Valid:   Oct 11, 2025 → Oct 11, 2026
+Files:   /etc/asterisk/keys/asterisk.crt  (certificate)
+         /etc/asterisk/keys/asterisk.key  (private key)
+         /etc/asterisk/keys/asterisk.pem  (combined)
+```
+
+> ⚠️ This is a **self-signed certificate**. SIP clients must be configured to accept self-signed certs:
+> - **Zoiper**: Settings → Advanced → *Allow insecure TLS* or *Accept self-signed*
+> - **Linphone**: Settings → Audio/Security → *Verify TLS certificates* → OFF
+> - **Blink/MicroSIP**: Trust this certificate on first connect
+
+### Fix Applied
+
+```sql
+UPDATE ps_transports
+SET
+    cert_file     = '/etc/asterisk/keys/asterisk.crt',
+    priv_key_file = '/etc/asterisk/keys/asterisk.key',
+    method        = 'default'   -- use best available TLS (not locked to tlsv1)
+WHERE id = 'transport-tls';
+```
+
+Persisted in migration `074_fix_pjsip_tls_transport.sql`.
+
+Reloaded without restart:
+```bash
+docker exec asterisk asterisk -rx "module reload res_pjsip.so"
+```
+
+### Verified State
+
+```bash
+# Confirm cert is now loaded in the running transport
+docker exec asterisk asterisk -rx "pjsip show transport transport-tls" | grep -E "cert|priv_key"
+# cert_file     : /etc/asterisk/keys/asterisk.crt  ✅
+# priv_key_file : /etc/asterisk/keys/asterisk.key  ✅
+
+# Confirm TLS handshake completes (TLS 1.2)
+openssl s_client -connect 127.0.0.1:5061 -tls1_2 </dev/null 2>&1 | grep CONNECTED
+# CONNECTED(00000003)  ✅
+```
+
+**TLS client configuration (Zoiper / Linphone):**
+```
+Server:     app.soham.top  (or 138.2.68.107)
+Port:       5061
+Transport:  TLS
+Username:   1000
+Password:   agent100pass
+Accept self-signed certificate: YES  (required — not a CA-issued cert)
+```
+
+> **Future improvement**: Replace the self-signed cert with a Let's Encrypt certificate.  
+> Since `app.soham.top` already has a valid cert managed by Caddy, the same cert can be
+> mounted into the Asterisk container. See the section on certificate management below.
+
+---
+
+## 9. ARA Database Tables — Current State
 
 All softphone extensions are managed exclusively through these MySQL tables. No static endpoint config in `.conf` files.
 
-### 7.1 `ps_endpoints` — SIP Endpoint Configuration
+### 9.1 `ps_endpoints` — SIP Endpoint Configuration
 
 The central table. One row per extension.
 
@@ -254,7 +431,7 @@ The central table. One row per extension.
 
 > **Critical**: If `webrtc`, `media_encryption`, `use_avpf`, or `ice_support` are set to `yes`/`dtls`/`passive`, native SIP clients (Zoiper, Linphone) **cannot register**. Those fields are for browser-based WebRTC only.
 
-### 7.2 `ps_auths` — Authentication Credentials
+### 9.2 `ps_auths` — Authentication Credentials
 
 | Column | 1000 | 1001 | Notes |
 |--------|------|------|-------|
@@ -267,7 +444,7 @@ The central table. One row per extension.
 
 > **How Asterisk verifies credentials**: When a softphone sends a REGISTER with `Authorization: Digest`, Asterisk computes `MD5(username:realm:password)` from the stored plaintext and compares it against the response hash in the SIP header. The realm used is the global one from `[global]` in `pjsip.conf` unless overridden per-auth row.
 
-### 7.3 `ps_aors` — Address of Record (Registration Bindings)
+### 9.3 `ps_aors` — Address of Record (Registration Bindings)
 
 | Column | 1000 | 1001 | Notes |
 |--------|------|------|-------|
@@ -280,7 +457,7 @@ The central table. One row per extension.
 
 > When a softphone successfully registers, Asterisk writes the contact URI (e.g. `sip:1000@192.168.1.5:5060`) into the `ps_contacts` table. This is looked up when making outbound calls to the extension.
 
-### 7.4 `ps_endpoint_id_ips` — IP-based Endpoint Identification
+### 9.4 `ps_endpoint_id_ips` — IP-based Endpoint Identification
 
 Used **only for the Twilio trunk** (IP auth, no credentials). Softphone extensions do not have identify records — they are matched by the `username` in the SIP `To:` header.
 
@@ -293,7 +470,7 @@ Used **only for the Twilio trunk** (IP auth, no credentials). Softphone extensio
 | `twilio-oregon` | `twilio_trunk` | `54.244.51.0/24` |
 | `twilio-saopaulo` | `twilio_trunk` | `177.71.206.192/26` |
 
-### 7.5 `ps_acl` and `ps_endpoint_acl` — Named ACL Rules
+### 9.5 `ps_acl` and `ps_endpoint_acl` — Named ACL Rules
 
 Both tables are **empty** (no rules = no restrictions). Created during this fix session because Asterisk expects them to exist when listed in `extconfig.conf`.
 
@@ -310,7 +487,7 @@ SELECT COUNT(*) FROM ps_endpoint_acl; -- 0 (no endpoint-to-ACL mappings)
 > ```
 > Then reload: `asterisk -rx "module reload res_pjsip.so"`
 
-### 7.6 extconfig.conf — ODBC Table Mapping
+### 9.6 extconfig.conf — ODBC Table Mapping
 
 ```ini
 [settings]
@@ -325,7 +502,7 @@ queue_members   => odbc,asterisk,queue_members
 ps_transports   => odbc,asterisk,ps_transports
 ```
 
-### 7.7 sorcery.conf — Object Resolution Order
+### 9.7 sorcery.conf — Object Resolution Order
 
 ```ini
 [res_pjsip]
@@ -347,7 +524,7 @@ The `0` suffix on config sources means "don't cache" — always re-read. Databas
 
 ---
 
-## 8. Python SIP Registration Test Tool
+## 10. Python SIP Registration Test Tool
 
 A Python script is used to simulate a full SIP REGISTER flow with proper digest authentication. This is the definitive way to validate the end-to-end stack **without needing a GUI softphone**.
 
@@ -626,7 +803,7 @@ All tests PASSED ✅
 
 ---
 
-## 9. Quick Validation Checklist
+## 11. Quick Validation Checklist
 
 Run these commands to verify the system is healthy:
 
@@ -637,7 +814,12 @@ docker exec asterisk asterisk -rx "core show version"
 
 # 2. Transports are loaded
 docker exec asterisk asterisk -rx "pjsip show transports"
-# Expected: transport-udp (5060), transport-tcp (5060), transport-tls (5061)
+# Expected: transport-udp (5060), transport-tcp (5060), transport-tls (5061), transport-ws (8088)
+
+# 2b. TLS transport has certificate loaded
+docker exec asterisk asterisk -rx "pjsip show transport transport-tls" | grep -E "cert_file|priv_key"
+# Expected: cert_file = /etc/asterisk/keys/asterisk.crt
+#           priv_key_file = /etc/asterisk/keys/asterisk.key
 
 # 3. Extensions are loaded from database
 docker exec asterisk asterisk -rx "pjsip show endpoints"
@@ -671,11 +853,28 @@ python3 /tmp/test_sip_register.py
 # 10. Live log check during Zoiper registration
 docker exec asterisk tail -f /var/log/asterisk/messages 2>/dev/null | grep -i register
 # Expected after Zoiper connects: "... - Successfully authenticated" or "200 OK"
+
+# 11. Verify web softphone WebSocket proxy path
+docker exec caddy wget -q -S -O/dev/null \
+  --header='Upgrade: websocket' --header='Connection: Upgrade' \
+  --header='Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  --header='Sec-WebSocket-Version: 13' --header='Sec-WebSocket-Protocol: sip' \
+  http://asterisk:8088/ws 2>&1 | grep '101'
+# Expected: HTTP/1.1 101 Switching Protocols  ← WebSocket upgrade OK
+
+# 12. Verify softphone credentials endpoint returns WSS/443
+curl -s http://localhost:8001/api/v1/softphone/credentials \
+  -H "Authorization: Bearer <token>" | python3 -m json.tool | grep -E 'transport|port'
+# Expected: "transport": "WSS", "port": 443
+
+# 13. Verify TLS port is accessible and certificate loads
+openssl s_client -connect 127.0.0.1:5061 -tls1_2 </dev/null 2>&1 | grep CONNECTED
+# Expected: CONNECTED(00000003)
 ```
 
 ---
 
-## 10. Adding New Extensions
+## 12. Adding New Extensions
 
 To add extension `1004` with password `newagentpass`:
 
@@ -711,7 +910,7 @@ python3 /tmp/test_sip_register.py --user 1004 --password newagentpass
 
 ---
 
-## 11. Files Changed Summary
+## 13. Files Changed Summary
 
 | File | Change | Reason |
 |------|--------|--------|
@@ -719,14 +918,18 @@ python3 /tmp/test_sip_register.py --user 1004 --password newagentpass
 | `docker/asterisk/config/extconfig.conf` | Added `ps_acl` and `ps_endpoint_acl` table mappings | Asterisk needed these tables registered for ARA |
 | `docker/asterisk/config/pjsip copy.conf` | **Deleted** | Had `match=138.2.68.107` mapping server IP as Twilio |
 | `backend/migrations/073_fix_pjsip_endpoint_acl.sql` | New migration | Clears `deny/permit` columns for all softphone endpoints |
+| `backend/migrations/074_fix_pjsip_tls_transport.sql` | New migration | Sets `cert_file`/`priv_key_file` in `ps_transports` for TLS |
+| `backend/internal/handler/softphone_handler.go` | Always return WSS/443 | Browser can't use UDP SIP; was building wrong WS URL |
 | `/etc/iptables/rules.v4` | Added SIP/RTP ACCEPT rules before REJECT | Firewall was silently dropping all SIP traffic |
 | MySQL `ps_endpoints` (live) | `deny=NULL, permit=NULL` for 1000, 1001 | Removed Docker-only IP whitelist |
+| MySQL `ps_transports` (live) | `cert_file` + `priv_key_file` set for `transport-tls` | TLS transport had no certificate — handshake failed |
 | MySQL `ps_acl` (live) | Created empty table | Missing table needed by Asterisk |
 | MySQL `ps_endpoint_acl` (live) | Created empty table | Missing table needed by Asterisk |
 
 ### Git Commits During This Fix Session
 
 ```
+069578d Fix: web softphone always returns WSS/443 credentials via Caddy proxy
 5c93c70 Fix: Clear PJSIP endpoint deny/permit ACL blocking external SIP clients
 e94889d Fix: Complete PJSIP ACL configuration and add testing guide
 06c56cc Document: ACL issue diagnosis and fix
@@ -743,6 +946,7 @@ ad397ae Add Linphone SIP configuration guide
 
 ### Zoiper / Linphone / Any SIP Client
 
+#### UDP (recommended for native clients)
 ```
 Account type:    SIP
 Server/Domain:   app.soham.top   (or 138.2.68.107 for direct IP)
@@ -751,6 +955,32 @@ Transport:       UDP
 Username:        1000
 Password:        agent100pass
 Realm:           asterisk   (or leave blank — auto-detected from 401 challenge)
+```
+
+#### TCP
+```
+Port:            5060
+Transport:       TCP
+(other fields same as UDP)
+```
+
+#### TLS (encrypted signaling)
+```
+Port:            5061
+Transport:       TLS
+Accept self-signed certificate: YES   ← required (cert CN=asterisk, not a CA cert)
+(other fields same as UDP)
+```
+
+> **TLS note**: The certificate is self-signed. Zoiper: Settings → Advanced → "Allow insecure TLS".  
+> Linphone: Preferences → Privacy → "Verify server certificates" → OFF.
+
+#### Web Softphone (browser — SIP.js)
+```
+Connects via:  wss://app.soham.top/ws   (port 443, Caddy → asterisk:8088)
+Transport:     WSS (always — browsers cannot use raw UDP/TCP SIP)
+Credentials:   Same username/password as above
+Config:        Automatic — backend always returns WSS/443 for browser clients
 ```
 
 | Extension | Username | Password | Context |
