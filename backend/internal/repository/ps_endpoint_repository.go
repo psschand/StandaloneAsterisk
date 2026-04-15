@@ -88,16 +88,28 @@ func (r *psEndpointRepository) FindByIDRange(ctx context.Context, extStart, extE
 	return endpoints, err
 }
 
-// FindUnassigned finds all PJSIP endpoints in a tenant's range that are not assigned to any user
+// FindUnassigned finds all PJSIP endpoints in a tenant's range that are not assigned to any user.
+// Uses a two-step query: first collect assigned extension IDs, then exclude them.
 func (r *psEndpointRepository) FindUnassigned(ctx context.Context, tenantID string, extStart, extEnd int) ([]asterisk.PsEndpoint, error) {
-	var endpoints []asterisk.PsEndpoint
-	// Get all extensions in range, then filter out assigned ones
-	err := r.db.WithContext(ctx).
+	// Step 1: get the list of extension IDs already assigned in this tenant
+	var assigned []string
+	if err := r.db.WithContext(ctx).
+		Table("user_roles").
+		Where("tenant_id = ? AND extension IS NOT NULL", tenantID).
+		Pluck("extension", &assigned).Error; err != nil {
+		return nil, err
+	}
+
+	// Step 2: query endpoints in range, excluding assigned ones
+	query := r.db.WithContext(ctx).
 		Where("CAST(id AS SIGNED) >= ? AND CAST(id AS SIGNED) <= ?", extStart, extEnd).
-		Not("id IN (?)", r.db.Select("extension").
-			Where("extension IS NOT NULL AND tenant_id = ?", tenantID).
-			Table("user_roles")).
-		Order("CAST(id AS SIGNED) ASC").
-		Find(&endpoints).Error
+		Order("CAST(id AS SIGNED) ASC")
+
+	if len(assigned) > 0 {
+		query = query.Where("id NOT IN ?", assigned)
+	}
+
+	var endpoints []asterisk.PsEndpoint
+	err := query.Find(&endpoints).Error
 	return endpoints, err
 }

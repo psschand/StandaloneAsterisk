@@ -44,6 +44,13 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
     }
   }, [isSuperAdmin, currentUserTenantId, formData.tenant_id]);
 
+  useEffect(() => {
+    setAutoExtension('');
+    setShowCustomInput(false);
+    setCustomExtension('');
+    setFormData(prev => ({ ...prev, extension: user?.roles?.[0]?.endpoint_id || '' }));
+  }, [formData.tenant_id, user?.roles]);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -57,7 +64,7 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
   });
 
   // Fetch selected tenant details (including extension range)
-  const { data: selectedTenant } = useQuery({
+  const { data: _selectedTenant } = useQuery({
     queryKey: ['tenant', formData.tenant_id],
     queryFn: async () => {
       if (!formData.tenant_id) return null;
@@ -67,20 +74,17 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
     enabled: !!formData.tenant_id,
   });
 
-  // Fetch extensions for selection
-  const { data: extensions = [] } = useQuery<Array<{ id: string; display_name: string }>>({
-    queryKey: ['extensions'],
+  // Fetch AVAILABLE (unassigned) extensions for the selected tenant
+  const { data: availableExtensions = [] } = useQuery<string[]>({
+    queryKey: ['available-extensions', formData.tenant_id],
     queryFn: async () => {
-      const response = await apiClient.get('/api/v1/extensions');
-      return response.data.data || [];
+      if (!formData.tenant_id) return [];
+      const res = await apiClient.get('/api/v1/users/available-extensions', {
+        params: { tenant_id: formData.tenant_id },
+      });
+      return res.data.data?.extensions || [];
     },
-  });
-
-  // Filter extensions by tenant range and get unassigned only
-  const filteredExtensions = extensions.filter((ext) => {
-    if (!selectedTenant) return true;
-    const extNum = parseInt(ext.id);
-    return extNum >= selectedTenant.extension_range_start && extNum <= selectedTenant.extension_range_end;
+    enabled: !!formData.tenant_id,
   });
 
   // Function to get next available extension
@@ -93,10 +97,12 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
     setIsLoadingExtension(true);
     setError('');
     try {
-      const response = await apiClient.get('/api/v1/users/available-extension');
+      const response = await apiClient.get('/api/v1/users/available-extension', {
+        params: { tenant_id: formData.tenant_id },
+      });
       const extension = response.data.data.extension;
       setAutoExtension(extension);
-      setFormData({ ...formData, extension });
+      setFormData(prev => ({ ...prev, extension }));
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to get available extension - may be no unassigned extensions in range');
       setAutoExtension('');
@@ -357,33 +363,45 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
                             type="button"
                             onClick={() => {
                               setAutoExtension('');
-                              setFormData({ ...formData, extension: '' });
+                              setFormData(prev => ({ ...prev, extension: '' }));
                             }}
                             className="text-sm text-gray-600 hover:text-gray-800"
                           >
-                            Skip assignment
+                            No extension
                           </button>
                         </div>
                       </div>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={getNextAvailableExtension}
-                        disabled={isLoadingExtension || !formData.tenant_id}
-                        className="w-full py-2 px-4 bg-blue-50 hover:bg-blue-100 border-2 border-blue-200 rounded-md text-sm font-medium text-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                      >
-                        {isLoadingExtension ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            Finding next available...
-                          </>
-                        ) : (
-                          <>
-                            <Zap className="w-4 h-4" />
-                            Find Next Available
-                          </>
-                        )}
-                      </button>
+                      <div className="space-y-2">
+                        <button
+                          type="button"
+                          onClick={getNextAvailableExtension}
+                          disabled={isLoadingExtension || !formData.tenant_id}
+                          className="w-full py-2 px-4 bg-blue-50 hover:bg-blue-100 border-2 border-blue-200 rounded-md text-sm font-medium text-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                          {isLoadingExtension ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Finding next available...
+                            </>
+                          ) : (
+                            <>
+                              <Zap className="w-4 h-4" />
+                              Find Next Available
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAutoExtension('');
+                            setFormData(prev => ({ ...prev, extension: '' }));
+                          }}
+                          className="w-full py-2 px-4 bg-gray-50 hover:bg-gray-100 border-2 border-gray-200 rounded-md text-sm font-medium text-gray-700 transition-colors"
+                        >
+                          No Extension
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
@@ -403,12 +421,18 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
                           disabled={!formData.tenant_id}
                         >
                           <option value="">No Extension</option>
-                          {filteredExtensions.map((ext) => (
-                            <option key={ext.id} value={ext.id}>
-                              {ext.id} - {ext.display_name || 'No Name'}
+                          {availableExtensions.map((extId) => (
+                            <option key={extId} value={extId}>
+                              {extId}
                             </option>
                           ))}
                         </select>
+                        {formData.tenant_id && availableExtensions.length === 0 && (
+                          <p className="text-xs text-orange-600">No available extensions in tenant range</p>
+                        )}
+                        {formData.tenant_id && availableExtensions.length > 0 && (
+                          <p className="text-xs text-gray-500">{availableExtensions.length} unassigned extension{availableExtensions.length !== 1 ? 's' : ''} available</p>
+                        )}
                         <button
                           type="button"
                           onClick={() => setShowCustomInput(true)}
@@ -448,11 +472,6 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
                   </div>
                 )}
 
-                {selectedTenant && (
-                  <p className="mt-2 text-xs text-gray-500">
-                    Tenant range: {selectedTenant.extension_range_start}-{selectedTenant.extension_range_end}
-                  </p>
-                )}
               </div>
 
               <div>

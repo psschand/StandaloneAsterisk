@@ -98,6 +98,7 @@ type CreateUserRequest struct {
 	FirstName string  `json:"first_name" binding:"required" example:"John"`
 	LastName  string  `json:"last_name" binding:"required" example:"Doe"`
 	Phone     *string `json:"phone,omitempty" example:"+1234567890"`
+	TenantID  *string `json:"tenant_id,omitempty" example:"acme-corp"`
 	Role      *string `json:"role,omitempty" example:"agent"`
 	Extension *string `json:"extension,omitempty" example:"agent100"`
 	Status    *string `json:"status,omitempty" example:"active"`

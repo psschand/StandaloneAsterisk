@@ -6,12 +6,14 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/psschand/callcenter/internal/asterisk"
 	"github.com/psschand/callcenter/internal/common"
 	"github.com/psschand/callcenter/internal/core"
 	"github.com/psschand/callcenter/internal/dto"
 	"github.com/psschand/callcenter/internal/repository"
 	"github.com/psschand/callcenter/pkg/errors"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // UserService handles user operations
@@ -26,6 +28,7 @@ type UserService interface {
 	ActivateUser(ctx context.Context, id int64) error
 	DeactivateUser(ctx context.Context, id int64) error
 	GetNextAvailableExtension(ctx context.Context, tenantID string) (string, error)
+	GetAvailableExtensions(ctx context.Context, tenantID string) ([]string, error)
 }
 
 type userService struct {
@@ -114,7 +117,7 @@ func (s *userService) Create(ctx context.Context, tenantID string, req *dto.Crea
 
 	// Validate extension if provided
 	if req.Extension != nil && *req.Extension != "" {
-		if err := s.validateExtension(ctx, tenant, *req.Extension); err != nil {
+		if err := s.validateExtension(ctx, tenant, *req.Extension, 0); err != nil {
 			return nil, err
 		}
 	}
@@ -273,7 +276,7 @@ func (s *userService) Update(ctx context.Context, id int64, req *dto.UpdateUserR
 			if err != nil {
 				return nil, errors.NewNotFound("tenant not found")
 			}
-			if err := s.validateExtension(ctx, tenant, *req.Extension); err != nil {
+			if err := s.validateExtension(ctx, tenant, *req.Extension, user.ID); err != nil {
 				return nil, err
 			}
 		}
@@ -447,8 +450,9 @@ func (s *userService) DeactivateUser(ctx context.Context, id int64) error {
 	return nil
 }
 
-// validateExtension validates that the extension is numeric, within the tenant's range, and exists in ps_endpoints
-func (s *userService) validateExtension(ctx context.Context, tenant *core.Tenant, extension string) error {
+// validateExtension validates that the extension is numeric, within the tenant's range, exists in ps_endpoints,
+// and is not already assigned to another user in the tenant.
+func (s *userService) validateExtension(ctx context.Context, tenant *core.Tenant, extension string, excludeUserID int64) error {
 	// Validate extension is numeric
 	extNum, err := strconv.Atoi(extension)
 	if err != nil {
@@ -471,30 +475,53 @@ func (s *userService) validateExtension(ctx context.Context, tenant *core.Tenant
 		)
 	}
 
+	assignedRole, err := s.roleRepo.FindByTenantAndExtension(ctx, tenant.ID, extension)
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return errors.Wrap(err, "failed to validate extension assignment")
+	}
+	if err == nil && assignedRole != nil && assignedRole.UserID != excludeUserID {
+		return errors.NewValidation(
+			fmt.Sprintf("extension %s is already assigned to another user", extension),
+		)
+	}
+
 	return nil
+}
+
+// getUnassignedEndpoints is a shared helper to fetch unassigned endpoints for a tenant
+func (s *userService) getUnassignedEndpoints(ctx context.Context, tenantID string) ([]asterisk.PsEndpoint, error) {
+	tenant, err := s.tenantRepo.FindByID(ctx, tenantID)
+	if err != nil {
+		return nil, errors.NewNotFound("tenant not found")
+	}
+	ends, err := s.endpointRepo.FindUnassigned(ctx, tenantID, tenant.ExtensionRangeStart, tenant.ExtensionRangeEnd)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to fetch available extensions")
+	}
+	return ends, nil
 }
 
 // GetNextAvailableExtension finds and returns the next available extension for a tenant
 func (s *userService) GetNextAvailableExtension(ctx context.Context, tenantID string) (string, error) {
-	// Get tenant info to know the extension range
-	tenant, err := s.tenantRepo.FindByID(ctx, tenantID)
+	ends, err := s.getUnassignedEndpoints(ctx, tenantID)
 	if err != nil {
-		return "", errors.NewNotFound("tenant not found")
+		return "", err
 	}
+	if len(ends) == 0 {
+		return "", errors.NewValidation("no available extensions in tenant range")
+	}
+	return ends[0].ID, nil
+}
 
-	// Get all unassigned extensions in the tenant's range, sorted
-	endpoints, err := s.endpointRepo.FindUnassigned(ctx, tenantID, tenant.ExtensionRangeStart, tenant.ExtensionRangeEnd)
+// GetAvailableExtensions returns all unassigned extension IDs for a tenant
+func (s *userService) GetAvailableExtensions(ctx context.Context, tenantID string) ([]string, error) {
+	ends, err := s.getUnassignedEndpoints(ctx, tenantID)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to fetch available extensions")
+		return nil, err
 	}
-
-	if len(endpoints) == 0 {
-		return "", errors.NewValidation(fmt.Sprintf(
-			"no available extensions in range %d-%d for tenant %s",
-			tenant.ExtensionRangeStart, tenant.ExtensionRangeEnd, tenantID,
-		))
+	ids := make([]string, len(ends))
+	for i, e := range ends {
+		ids[i] = e.ID
 	}
-
-	// Return the first available extension ID
-	return endpoints[0].ID, nil
+	return ids, nil
 }

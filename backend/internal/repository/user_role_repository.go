@@ -13,6 +13,7 @@ type UserRoleRepository interface {
 	Create(ctx context.Context, role *core.UserRole) error
 	FindByID(ctx context.Context, id int64) (*core.UserRole, error)
 	FindByUserAndTenant(ctx context.Context, userID int64, tenantID string) (*core.UserRole, error)
+	FindByTenantAndExtension(ctx context.Context, tenantID, extension string) (*core.UserRole, error)
 	FindByUser(ctx context.Context, userID int64) ([]core.UserRole, error)
 	Update(ctx context.Context, role *core.UserRole) error
 	Delete(ctx context.Context, id int64) error
@@ -50,6 +51,18 @@ func (r *userRoleRepository) FindByUserAndTenant(ctx context.Context, userID int
 	var role core.UserRole
 	err := r.db.WithContext(ctx).
 		Where("user_id = ? AND tenant_id = ?", userID, tenantID).
+		First(&role).Error
+	if err != nil {
+		return nil, err
+	}
+	return &role, nil
+}
+
+// FindByTenantAndExtension finds a role assignment by tenant and extension
+func (r *userRoleRepository) FindByTenantAndExtension(ctx context.Context, tenantID, extension string) (*core.UserRole, error) {
+	var role core.UserRole
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND extension = ?", tenantID, extension).
 		First(&role).Error
 	if err != nil {
 		return nil, err

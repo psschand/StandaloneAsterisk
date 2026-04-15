@@ -24,11 +24,20 @@ func NewUserHandler(userService service.UserService) *UserHandler {
 // Create creates a new user
 func (h *UserHandler) Create(c *gin.Context) {
 	tenantID := c.GetString("tenant_id")
+	requestRole := c.GetString("role")
 
 	var req dto.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.ValidationError(c, err)
 		return
+	}
+
+	if req.TenantID != nil && *req.TenantID != "" {
+		if requestRole != "superadmin" && *req.TenantID != tenantID {
+			response.Forbidden(c, "cannot create users outside your tenant")
+			return
+		}
+		tenantID = *req.TenantID
 	}
 
 	result, err := h.userService.Create(c.Request.Context(), tenantID, &req)
@@ -191,9 +200,26 @@ func (h *UserHandler) Deactivate(c *gin.Context) {
 	response.Success(c, nil)
 }
 
+// resolveTenantID resolves the effective tenant ID from query param (superadmin can override)
+func (h *UserHandler) resolveTenantID(c *gin.Context) (string, bool) {
+	tenantID := c.GetString("tenant_id")
+	requestRole := c.GetString("role")
+	if requested := c.Query("tenant_id"); requested != "" {
+		if requestRole != "superadmin" && requested != tenantID {
+			response.Forbidden(c, "cannot access extensions outside your tenant")
+			return "", false
+		}
+		return requested, true
+	}
+	return tenantID, true
+}
+
 // GetNextAvailableExtension gets the next available extension for tenant's range
 func (h *UserHandler) GetNextAvailableExtension(c *gin.Context) {
-	tenantID := c.GetString("tenant_id")
+	tenantID, ok := h.resolveTenantID(c)
+	if !ok {
+		return
+	}
 
 	extension, err := h.userService.GetNextAvailableExtension(c.Request.Context(), tenantID)
 	if err != nil {
@@ -202,4 +228,20 @@ func (h *UserHandler) GetNextAvailableExtension(c *gin.Context) {
 	}
 
 	response.Success(c, map[string]string{"extension": extension})
+}
+
+// GetAvailableExtensions returns all unassigned extensions for the tenant's range
+func (h *UserHandler) GetAvailableExtensions(c *gin.Context) {
+	tenantID, ok := h.resolveTenantID(c)
+	if !ok {
+		return
+	}
+
+	exts, err := h.userService.GetAvailableExtensions(c.Request.Context(), tenantID)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, map[string]interface{}{"extensions": exts, "count": len(exts)})
 }
