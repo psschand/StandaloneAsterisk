@@ -83,35 +83,115 @@ All migrations are numbered sequentially and executed in ascending order. The mi
 - `074_fix_pjsip_tls_transport.sql` — **Fix**: Set self-signed TLS cert in ps_transports (interim TLS fix)
 - `075_fix_pjsip_tls_letsencrypt.sql` — **Fix**: Replace with Let's Encrypt cert, set method=sslv23 (final TLS fix)
 
-## Running Migrations
+## Migration Runner — How It Works
 
-### Automatic (Recommended)
-The Go backend runs all pending migrations automatically at startup via `internal/database/migrate.go`. The runner:
-1. Creates a `migrations` table if it does not exist (idempotent)
-2. Reads all `*.sql` files from the configured migrations directory, sorted numerically
-3. Skips any migration whose ID is already recorded in the `migrations` table
-4. Executes each pending migration inside a transaction; rolls back on error
-5. Records the migration ID and timestamp upon success
+### Source: `backend/internal/database/migrate.go`
 
-This means **re-deploying the backend is safe** — only new migrations run.
+The Go backend runs all pending migrations **automatically at startup**. There is no separate `migrate` CLI command — the API server (`cmd/api/main.go`) calls `RunMigrations()` before starting. 
 
-### Manual via Docker (for debugging or emergency patches)
-```bash
-# Run a single migration manually
-docker exec -i mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" callcenter \
-  < backend/migrations/075_fix_pjsip_tls_letsencrypt.sql
+### Filename Format
 
-# Run all migrations in order (use with caution — already-applied ones are idempotent due to IF NOT EXISTS)
-for f in backend/migrations/*.sql; do
-  docker exec -i mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" callcenter < "$f"
-done
+Migration files must be named: `NNN_description.sql` where `NNN` is a zero-padded integer (e.g. `073`). The runner extracts the numeric ID from the filename prefix to determine execution order and to record state. Files that do not match this pattern are skipped with a warning.
+
+### Runner Behaviour (step by step)
+
+1. **Bootstrap**: Creates the `migrations` tracking table if absent (idempotent `CREATE TABLE IF NOT EXISTS`)
+2. **Load applied**: Reads `SELECT id FROM migrations` into a map
+3. **Discover files**: Globs `./migrations/*.sql`, sorted by numeric ID
+4. **Skip applied**: If a migration ID is already in the map → skip
+5. **Execute in transaction**: Each SQL file is split on `;` and each statement executed via `db.Exec()`. Rolls back the whole file on any error
+6. **Record success**: `INSERT INTO migrations (id, name)` inside the same transaction
+
+Re-deploying the backend is **safe** — only new migrations run.
+
+### `migrations` Tracking Table Schema
+
+```sql
+CREATE TABLE IF NOT EXISTS migrations (
+  id         INT PRIMARY KEY,
+  name       VARCHAR(255) NOT NULL,
+  applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
+| Column | Purpose |
+|--------|---------|
+| `id` | Numeric prefix from filename (e.g. `75` for `075_*`) |
+| `name` | Filename without extension and without the `NNN_` prefix |
+| `applied_at` | UTC timestamp when the migration ran |
+
+### Rollback
+
+**Rollbacks are not implemented.** There are no `*_down.sql` files. The `RollbackLastMigration()` function in `migrate.go` prints a warning and returns without making changes. Rollbacks must be done manually with `ALTER TABLE` / `UPDATE` statements.
+
+### Current State (as of 2026-04-15)
+
+| Metric | Value |
+|--------|-------|
+| Total migration files | 55 |
+| Applied (in `migrations` table) | 55 (IDs 2–75, with gaps 21–35) |
+| Pending | 0 |
+| Last applied | 75 — `fix_pjsip_tls_letsencrypt` |
+
+> Migrations 074 and 075 were originally applied manually (direct SQL via Docker exec) during an emergency TLS fix. They were subsequently registered in the `migrations` table (`INSERT IGNORE INTO migrations ...`) so the runner does not attempt to re-run them on next deploy.
+
+---
+
+## Running Migrations Manually
+
+For emergency patches or debugging, use the Docker exec approach:
+
+```bash
+# Apply a single new migration
+docker exec -i mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" callcenter \
+  < backend/migrations/076_your_new_migration.sql
+
+# Register it in the tracking table (so the auto-runner skips it)
+docker exec mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" callcenter \
+  -e "INSERT IGNORE INTO migrations (id, name) VALUES (76, 'your_new_migration')"
+```
+
+> **Important**: If you apply a migration manually, you MUST also insert a row into the `migrations` table. Otherwise the next backend restart will attempt to re-run it, which may fail or corrupt data.
+
 ### Check Applied Migrations
+
 ```bash
 docker exec mysql mysql -uroot -pcallcenterpass callcenter \
   -e "SELECT id, name, applied_at FROM migrations ORDER BY id"
+
+# Quick count
+docker exec mysql mysql -uroot -pcallcenterpass callcenter \
+  -e "SELECT COUNT(*) as applied, MAX(id) as last_id FROM migrations"
 ```
+
+## Creating New Migrations
+
+1. Pick the next sequential number: `ls backend/migrations/*.sql | sort | tail -1` → increment by 1
+2. Create file: `NNN_short_description.sql` (lowercase, underscores)
+3. Always use `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` where possible
+4. Run manually via Docker exec to test, then register in `migrations` table
+5. On next backend redeploy the runner will skip it (already tracked) — no double-run
+
+**Never reuse or renumber an existing migration ID.** If a migration needs to be undone, create a new higher-numbered migration that reverses the change.
+
+---
+
+## ARA (Asterisk Realtime Architecture) Migrations
+
+The following migrations are specifically related to PJSIP Realtime (ARA) tables. These are the tables Asterisk queries directly for endpoint/auth/transport configuration:
+
+| Migration | Table | Purpose |
+|-----------|-------|---------|
+| `055_create_ps_endpoint_id_ips_table.sql` | `ps_endpoint_id_ips` | IP-based endpoint identification (Twilio trunk) |
+| `061_seed_pjsip_only.sql` | `ps_endpoints`, `ps_auths`, `ps_aors` | Seed extension 1000, 1001, and twilio_trunk |
+| `063_create_ps_transports_table.sql` | `ps_transports` | Transport config (UDP/TCP/TLS/WS) |
+| `073_fix_pjsip_endpoint_acl.sql` | `ps_endpoints` | Clear deny/permit ACLs that blocked registration |
+| `074_fix_pjsip_tls_transport.sql` | `ps_transports` | Set self-signed TLS cert (interim, superseded by 075) |
+| `075_fix_pjsip_tls_letsencrypt.sql` | `ps_transports` | Set Let's Encrypt cert + `method=sslv23` (final state) |
+
+> For full ARA table schemas and troubleshooting, see `SIP_REGISTRATION_FIX_GUIDE.md` §9.
+
+---
 
 ## Schema Features
 

@@ -493,25 +493,26 @@ SELECT COUNT(*) FROM ps_endpoint_acl; -- 0 (no endpoint-to-ACL mappings)
 
 The **authoritative** source for all PJSIP transports. The static `[transport-*]` blocks in `pjsip.conf` are **silently ignored** when the transport name exists in this table (sorcery maps `transport = realtime,ps_transports`).
 
-| Column | transport-udp | transport-tls | transport-ws | Notes |
-|--------|---------------|---------------|--------------|-------|
-| `id` | `transport-udp` | `transport-tls` | `transport-ws` | Name referenced by `ps_endpoints.transport` |
-| `protocol` | `udp` | `tls` | `wss` | Transport protocol |
-| `bind` | `0.0.0.0:5060` | `0.0.0.0:5061` | `0.0.0.0:8088` | Listen address + port |
-| `cert_file` | `NULL` | `/caddy_certs/...pem` | `NULL` | **Must be set** for TLS — NULL causes silent failure |
-| `priv_key_file` | `NULL` | `/caddy_certs/...key` | `NULL` | **Must be set** for TLS |
-| `ca_list_file` | `NULL` | `NULL` | `NULL` | CA bundle (optional; clients often skip verification) |
-| `method` | `NULL` | `sslv23` | `NULL` | `sslv23` = modern TLS negotiation (TLS 1.2/1.3) |
-| `verify_client` | `NULL` | `no` | `NULL` | `no` = don't require client certificates |
-| `verify_server` | `NULL` | `no` | `NULL` | `no` = softphones may use self-signed |
+**Current live rows** (verified 2026-04-15):
 
-> **Critical lesson from this session**: If `cert_file` or `priv_key_file` is NULL in `ps_transports`, Asterisk silently skips TLS transport initialization — no error in the log, the transport doesn't start. Always check:
+| Column | transport-udp | transport-tcp | transport-tls | transport-ws |
+|--------|---------------|---------------|---------------|--------------|
+| `protocol` | `udp` | `tcp` | `tls` | `ws` |
+| `bind` | `0.0.0.0:5060` | `0.0.0.0:5060` | `0.0.0.0:5061` | `0.0.0.0:8088` |
+| `cert_file` | `NULL` | `NULL` | `/caddy_certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/app.soham.top/app.soham.top.crt` | `NULL` |
+| `priv_key_file` | `NULL` | `NULL` | `/caddy_certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/app.soham.top/app.soham.top.key` | `NULL` |
+| `method` | `default` | `default` | `sslv23` | `default` |
+| `verify_client` | `NULL` | `NULL` | `no` | `NULL` |
+| `verify_server` | `NULL` | `NULL` | `no` | `NULL` |
+
+> **Notes on transport-ws**: The protocol value is `ws` (plain WebSocket on port 8088). TLS termination for WebSocket clients (WSS) is handled upstream by Caddy (`/ws` → `http://asterisk:8088`), so Asterisk sees plain `ws` internally.
+
+> **Critical lesson**: If `cert_file` or `priv_key_file` is NULL in `ps_transports`, Asterisk **silently skips TLS transport initialization** — no error in the log, the port never opens. Always verify:
 > ```sql
 > SELECT id, protocol, cert_file, priv_key_file, method FROM ps_transports;
 > ```
-> See migration `075_fix_pjsip_tls_letsencrypt.sql` for the fix that set the Let's Encrypt cert path.
 
-**Migration**: `063_create_ps_transports_table.sql` (created schema) → `061_seed_pjsip_only.sql` (initial data) → `074` (self-signed) → `075` (LE cert, final).
+**Migration history**: `063` (schema) → `061` (initial seed data) → `074` (self-signed cert, interim) → `075` (LE cert + `method=sslv23`, final)
 
 ---
 
@@ -1031,6 +1032,83 @@ e94889d Fix: Complete PJSIP ACL configuration and add testing guide
 
 febad78 Document Linphone native SIP fix: endpoint profile + firewall  ← last pushed
 ```
+
+---
+
+## 14. ARA DB Quick Reference — All Tables
+
+Complete reference for all 8 `ps_*` ARA tables Asterisk queries over ODBC. Use this section when debugging registration or transport issues.
+
+### Summary Table
+
+| Table | Written by | Read by | Contains |
+|-------|-----------|---------|---------|
+| `ps_endpoints` | Admin/migration | Asterisk at INVITE/REGISTER | Endpoint config, codecs, transport, ACL pointers |
+| `ps_auths` | Admin/migration | Asterisk on auth challenge | Credentials (username + password) |
+| `ps_aors` | Admin/migration | Asterisk on REGISTER | Address of Record, max contacts, expiry |
+| `ps_contacts` | **Asterisk** (runtime) | Asterisk on outbound call | Live registration bindings (caller → IP:port) |
+| `ps_transports` | Admin/migration | Asterisk at startup | Protocol, bind port, TLS cert paths |
+| `ps_endpoint_id_ips` | Admin/migration | Asterisk on INVITE (IP match) | IP CIDR → endpoint mapping (Twilio trunk) |
+| `ps_acl` | Admin/migration | Asterisk (if ACL rules set) | Named ACL deny/permit rules |
+| `ps_endpoint_acl` | Admin/migration | Asterisk (if ACL rules set) | Endpoint → ACL name mapping |
+
+### Useful Diagnostic Queries
+
+```sql
+-- All configured extensions
+SELECT id, transport, context, allow, deny, permit, acl FROM ps_endpoints;
+
+-- Check credentials
+SELECT id, username, auth_type, realm FROM ps_auths;
+
+-- Check registration bindings (live)
+SELECT id, expiration, max_contacts FROM ps_aors;
+
+-- Who is currently registered?
+SELECT endpoint, contact, user_agent,
+       FROM_UNIXTIME(expiration_time) AS expires_at
+FROM ps_contacts;
+
+-- TLS cert state (must have cert_file not NULL for TLS)
+SELECT id, protocol, bind, cert_file, priv_key_file, method FROM ps_transports;
+
+-- Twilio trunk IP match rules
+SELECT id, endpoint, match FROM ps_endpoint_id_ips;
+
+-- ACL rules (should be empty for open registration)
+SELECT 'ps_acl', COUNT(*) FROM ps_acl
+UNION SELECT 'ps_endpoint_acl', COUNT(*) FROM ps_endpoint_acl;
+```
+
+### One-Command Health Check
+
+```bash
+docker exec mysql mysql -uroot -pcallcenterpass callcenter 2>/dev/null <<'EOF'
+SELECT 'endpoints' AS tbl, COUNT(*) AS rows FROM ps_endpoints
+UNION SELECT 'auths',       COUNT(*) FROM ps_auths
+UNION SELECT 'aors',        COUNT(*) FROM ps_aors
+UNION SELECT 'contacts',    COUNT(*) FROM ps_contacts
+UNION SELECT 'transports',  COUNT(*) FROM ps_transports
+UNION SELECT 'id_ips',      COUNT(*) FROM ps_endpoint_id_ips
+UNION SELECT 'acl',         COUNT(*) FROM ps_acl
+UNION SELECT 'endpoint_acl',COUNT(*) FROM ps_endpoint_acl;
+EOF
+```
+
+Expected output on a healthy system (no clients registered):
+
+| tbl | rows |
+|-----|------|
+| endpoints | 3 |
+| auths | 2 |
+| aors | 3 |
+| contacts | 0 |
+| transports | 4 |
+| id_ips | 6 |
+| acl | 0 |
+| endpoint_acl | 0 |
+
+> `contacts` = 0 means no softphones are currently registered. Register with Zoiper/Linphone and re-run to confirm.
 
 ---
 
