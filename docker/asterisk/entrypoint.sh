@@ -41,6 +41,20 @@ max_connections => 20
 EOF
 
 # If no command given, run asterisk in foreground; otherwise exec provided command
+
+# Generate self-signed TLS certificates for PJSIP/SIP TLS transport if they don't exist
+if [ ! -f /etc/asterisk/keys/asterisk.crt ] || [ ! -f /etc/asterisk/keys/asterisk.key ]; then
+  echo "Generating self-signed TLS certificates for SIP TLS..."
+  mkdir -p /etc/asterisk/keys
+  openssl req -new -x509 -days 365 -nodes \
+    -out /etc/asterisk/keys/asterisk.crt \
+    -keyout /etc/asterisk/keys/asterisk.key \
+    -subj "/C=US/ST=State/L=City/O=Organization/CN=asterisk.local"
+  chmod 600 /etc/asterisk/keys/asterisk.key
+  chmod 644 /etc/asterisk/keys/asterisk.crt
+  echo "TLS certificates generated at /etc/asterisk/keys/"
+fi
+
 if [ "$#" -eq 0 ]; then
   exec asterisk -f
 else

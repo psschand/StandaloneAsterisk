@@ -59,6 +59,18 @@ RUN contrib/scripts/install_prereq install || true
 RUN ./bootstrap.sh || true
 RUN ./configure --with-pjproject-bundled --with-ssl --with-srtp --with-jansson-bundled
 
+# Enable TCP and TLS transport modules for res_pjsip
+RUN if [ -f menuselect.makeopts ]; then \
+      sed -i 's/^# res_pjsip_transport_tcp/res_pjsip_transport_tcp/g' menuselect.makeopts; \
+      sed -i 's/^# res_pjsip_transport_tls/res_pjsip_transport_tls/g' menuselect.makeopts; \
+    else \
+      echo "menuselect.makeopts not found, will attempt implicit menuselect" && \
+      ./configure --with-pjproject-bundled --with-ssl --with-srtp --with-jansson-bundled && \
+      make menuselect.makeopts && \
+      sed -i 's/^# res_pjsip_transport_tcp/res_pjsip_transport_tcp/g' menuselect.makeopts && \
+      sed -i 's/^# res_pjsip_transport_tls/res_pjsip_transport_tls/g' menuselect.makeopts; \
+    fi
+
 # Non-interactive build: try to build with available cores. If menuselect is needed,
 # the build may require tweaking the menuselect options in ${ASTERISK_SRC}/menuselect/.
 RUN make -j$(nproc) || (echo "make failed; re-running single-threaded to get clearer error" && make)
@@ -73,6 +85,38 @@ ENV PATH="/usr/sbin:/usr/bin:${PATH}"
 # Expose the default ports typically used by Asterisk (adjust as needed)
 EXPOSE 5060/udp 5060/tcp 8088/tcp 8088/udp 4573/tcp
 
-# Default command is to show the version; runtime images can use this as a base and
-# provide entrypoint scripts that configure ODBC and copy config files as needed.
-CMD ["/usr/sbin/asterisk", "-V"]
+# Install additional tools and ODBC/MySQL drivers for realtime database support
+USER root
+RUN apt-get update && apt-get install -y \
+  curl \
+  vim \
+  unixodbc \
+  unixodbc-dev \
+  wget \
+  ca-certificates \
+  gnupg \
+  lsb-release \
+  mariadb-client \
+  odbcinst \
+  netcat-openbsd \
+  libogg0 \
+  libvorbis-dev \
+  libpq5 \
+  libsqlite3-0 \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install MySQL / MyODBC Connector (Connector/ODBC)
+RUN set -eux; \
+  apt-get update; \
+  apt-get install -y odbc-mariadb || true;
+
+# Copy configuration and entrypoint
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+COPY ast_logescalator /var/lib/asterisk/scripts/ast_logescalator
+RUN chmod +x /var/lib/asterisk/scripts/ast_logescalator || true
+
+COPY odbc.ini /etc/odbc.ini
+
+ENTRYPOINT ["/entrypoint.sh"]
