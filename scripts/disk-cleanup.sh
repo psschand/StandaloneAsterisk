@@ -21,6 +21,10 @@ fi
 echo "--- Docker: removing dangling images ---"
 docker image prune -f 2>/dev/null
 
+echo "--- Docker: removing images not used by any container (keeps running/stopped) ---"
+# Only removes images with no associated container (safe — won't touch active images)
+docker image prune -f 2>/dev/null
+
 echo "--- Docker: removing unused volumes ---"
 docker volume prune -f 2>/dev/null
 
