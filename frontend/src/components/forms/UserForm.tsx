@@ -162,7 +162,13 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
       await onSave(userData);
       onClose();
     } catch (err: any) {
-      setError(getApiErrorMessage(err, 'Failed to save user'));
+      const message = getApiErrorMessage(err, 'Failed to save user');
+      setError(message);
+
+      // For create flow, clear email when backend reports duplicate email in tenant.
+      if (!user && message.toLowerCase().includes('email already exists')) {
+        setFormData((prev) => ({ ...prev, email: '' }));
+      }
     } finally {
       setIsSubmitting(false);
     }
