@@ -489,7 +489,63 @@ SELECT COUNT(*) FROM ps_endpoint_acl; -- 0 (no endpoint-to-ACL mappings)
 > ```
 > Then reload: `asterisk -rx "module reload res_pjsip.so"`
 
-### 9.6 extconfig.conf — ODBC Table Mapping
+### 9.6 `ps_transports` — Transport Configuration (TLS/UDP/WS)
+
+The **authoritative** source for all PJSIP transports. The static `[transport-*]` blocks in `pjsip.conf` are **silently ignored** when the transport name exists in this table (sorcery maps `transport = realtime,ps_transports`).
+
+| Column | transport-udp | transport-tls | transport-ws | Notes |
+|--------|---------------|---------------|--------------|-------|
+| `id` | `transport-udp` | `transport-tls` | `transport-ws` | Name referenced by `ps_endpoints.transport` |
+| `protocol` | `udp` | `tls` | `wss` | Transport protocol |
+| `bind` | `0.0.0.0:5060` | `0.0.0.0:5061` | `0.0.0.0:8088` | Listen address + port |
+| `cert_file` | `NULL` | `/caddy_certs/...pem` | `NULL` | **Must be set** for TLS — NULL causes silent failure |
+| `priv_key_file` | `NULL` | `/caddy_certs/...key` | `NULL` | **Must be set** for TLS |
+| `ca_list_file` | `NULL` | `NULL` | `NULL` | CA bundle (optional; clients often skip verification) |
+| `method` | `NULL` | `sslv23` | `NULL` | `sslv23` = modern TLS negotiation (TLS 1.2/1.3) |
+| `verify_client` | `NULL` | `no` | `NULL` | `no` = don't require client certificates |
+| `verify_server` | `NULL` | `no` | `NULL` | `no` = softphones may use self-signed |
+
+> **Critical lesson from this session**: If `cert_file` or `priv_key_file` is NULL in `ps_transports`, Asterisk silently skips TLS transport initialization — no error in the log, the transport doesn't start. Always check:
+> ```sql
+> SELECT id, protocol, cert_file, priv_key_file, method FROM ps_transports;
+> ```
+> See migration `075_fix_pjsip_tls_letsencrypt.sql` for the fix that set the Let's Encrypt cert path.
+
+**Migration**: `063_create_ps_transports_table.sql` (created schema) → `061_seed_pjsip_only.sql` (initial data) → `074` (self-signed) → `075` (LE cert, final).
+
+---
+
+### 9.7 `ps_contacts` — Runtime Registration Bindings (ephemeral)
+
+Written **at runtime by Asterisk** when a softphone successfully registers. Not manually inserted — querying this table is the most direct way to confirm a client is registered.
+
+| Column | Example value | Notes |
+|--------|---------------|-------|
+| `id` | `1000/sip:1000@10.0.1.5:5060;ob` | Auto-generated: `{aor_id}/{contact_uri}` |
+| `endpoint` | `1000` | References `ps_endpoints.id` |
+| `contact` | `sip:1000@10.0.1.5:5060;ob` | Full SIP Contact URI sent in REGISTER |
+| `user_agent` | `Zoiper5 v5.6.x` | Softphone app/version |
+| `expiration_time` | `1748000000` | UNIX timestamp when registration expires |
+| `qualify_frequency` | `0` | If > 0, OPTIONS ping interval in seconds |
+| `call_id` | `abc123@10.0.1.5` | SIP Call-ID from the REGISTER message |
+| `path` | `NULL` | SIP Path header (edge proxy routing) |
+
+```sql
+-- Check who is currently registered
+SELECT endpoint, contact, user_agent, expiration_time
+FROM ps_contacts
+ORDER BY endpoint;
+
+-- Confirm a specific extension is online
+SELECT * FROM ps_contacts WHERE endpoint = '1000';
+```
+
+> The table is empty when no clients are registered. Asterisk automatically removes expired rows.  
+> This is the runtime equivalent of `asterisk -rx "pjsip show contacts"`.
+
+---
+
+### 9.8 extconfig.conf — ODBC Table Mapping
 
 ```ini
 [settings]
@@ -504,7 +560,7 @@ queue_members   => odbc,asterisk,queue_members
 ps_transports   => odbc,asterisk,ps_transports
 ```
 
-### 9.7 sorcery.conf — Object Resolution Order
+### 9.9 sorcery.conf — Object Resolution Order
 
 ```ini
 [res_pjsip]
