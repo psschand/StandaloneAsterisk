@@ -174,7 +174,7 @@ services:
       - /var/log/fail2ban.log:/var/log/fail2ban.log:ro
       - asterisk_recordings:/var/spool/asterisk/monitor:ro
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8001/api/v1/health"]
+      test: ["CMD-SHELL", "wget -S -O- http://127.0.0.1:8001/ 2>&1 | grep -q 'HTTP/'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -201,7 +201,7 @@ services:
     networks:
       - call-center-network
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -238,7 +238,7 @@ services:
       - backend
       - frontend
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:2019/config/"]
       interval: 30s
       timeout: 10s
       retries: 3
