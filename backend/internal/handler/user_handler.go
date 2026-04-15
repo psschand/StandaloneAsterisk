@@ -190,3 +190,16 @@ func (h *UserHandler) Deactivate(c *gin.Context) {
 
 	response.Success(c, nil)
 }
+
+// GetNextAvailableExtension gets the next available extension for tenant's range
+func (h *UserHandler) GetNextAvailableExtension(c *gin.Context) {
+	tenantID := c.GetString("tenant_id")
+
+	extension, err := h.userService.GetNextAvailableExtension(c.Request.Context(), tenantID)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.Success(c, map[string]string{"extension": extension})
+}

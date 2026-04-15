@@ -25,6 +25,7 @@ type UserService interface {
 	UpdateRole(ctx context.Context, userID int64, tenantID, role string) error
 	ActivateUser(ctx context.Context, id int64) error
 	DeactivateUser(ctx context.Context, id int64) error
+	GetNextAvailableExtension(ctx context.Context, tenantID string) (string, error)
 }
 
 type userService struct {
@@ -471,4 +472,29 @@ func (s *userService) validateExtension(ctx context.Context, tenant *core.Tenant
 	}
 
 	return nil
+}
+
+// GetNextAvailableExtension finds and returns the next available extension for a tenant
+func (s *userService) GetNextAvailableExtension(ctx context.Context, tenantID string) (string, error) {
+	// Get tenant info to know the extension range
+	tenant, err := s.tenantRepo.FindByID(ctx, tenantID)
+	if err != nil {
+		return "", errors.NewNotFound("tenant not found")
+	}
+
+	// Get all unassigned extensions in the tenant's range, sorted
+	endpoints, err := s.endpointRepo.FindUnassigned(ctx, tenantID, tenant.ExtensionRangeStart, tenant.ExtensionRangeEnd)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to fetch available extensions")
+	}
+
+	if len(endpoints) == 0 {
+		return "", errors.NewValidation(fmt.Sprintf(
+			"no available extensions in range %d-%d for tenant %s",
+			tenant.ExtensionRangeStart, tenant.ExtensionRangeEnd, tenantID,
+		))
+	}
+
+	// Return the first available extension ID
+	return endpoints[0].ID, nil
 }

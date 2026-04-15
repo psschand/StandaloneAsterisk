@@ -15,6 +15,8 @@ type PsEndpointRepository interface {
 	Update(ctx context.Context, endpoint *asterisk.PsEndpoint) error
 	Delete(ctx context.Context, id string) error
 	FindWithAuthAndAor(ctx context.Context, id string) (*asterisk.PsEndpoint, error)
+	FindUnassigned(ctx context.Context, tenantID string, extStart, extEnd int) ([]asterisk.PsEndpoint, error)
+	FindByIDRange(ctx context.Context, extStart, extEnd int) ([]asterisk.PsEndpoint, error)
 }
 
 // psEndpointRepository implements PsEndpointRepository
@@ -74,4 +76,25 @@ func (r *psEndpointRepository) FindWithAuthAndAor(ctx context.Context, id string
 		return nil, err
 	}
 	return &endpoint, nil
+}
+
+// FindByIDRange finds all PJSIP endpoints within a range of numeric IDs (for tenant extension range)
+func (r *psEndpointRepository) FindByIDRange(ctx context.Context, extStart, extEnd int) ([]asterisk.PsEndpoint, error) {
+	var endpoints []asterisk.PsEndpoint
+	err := r.db.WithContext(ctx).
+		Where("CAST(id AS SIGNED) >= ? AND CAST(id AS SIGNED) <= ?", extStart, extEnd).
+		Order("CAST(id AS SIGNED) ASC").
+		Find(&endpoints).Error
+	return endpoints, err
+}
+
+// FindUnassigned finds all PJSIP endpoints in a tenant's range that are not assigned to any user
+func (r *psEndpointRepository) FindUnassigned(ctx context.Context, tenantID string, extStart, extEnd int) ([]asterisk.PsEndpoint, error) {
+	var endpoints []asterisk.PsEndpoint
+	err := r.db.WithContext(ctx).
+		Where("CAST(id AS SIGNED) >= ? AND CAST(id AS SIGNED) <= ?", extStart, extEnd).
+		Where("id NOT IN (SELECT DISTINCT extension FROM user_roles WHERE extension IS NOT NULL AND tenant_id = ?)", tenantID).
+		Order("CAST(id AS SIGNED) ASC").
+		Find(&endpoints).Error
+	return endpoints, err
 }

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import apiClient from '../../lib/api';
 import config from '../../config';
 import { useAuthStore } from '../../store/authStore';
+import { Zap, Loader2 } from 'lucide-react';
 import type { User, UserRole, Tenant } from '../../types';
 
 interface UserFormProps {
@@ -29,6 +30,10 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
     password: '',
     confirm_password: '',
   });
+
+  const [extensionMode, setExtensionMode] = useState<'auto' | 'manual'>('auto');
+  const [autoExtension, setAutoExtension] = useState('');
+  const [isLoadingExtension, setIsLoadingExtension] = useState(false);
 
   // Auto-set tenant for non-superadmin users
   useEffect(() => {
@@ -75,6 +80,29 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
     const extNum = parseInt(ext.id);
     return extNum >= selectedTenant.extension_range_start && extNum <= selectedTenant.extension_range_end;
   });
+
+  // Function to get next available extension
+  const getNextAvailableExtension = async () => {
+    if (!formData.tenant_id) {
+      setError('Please select a tenant first');
+      return;
+    }
+
+    setIsLoadingExtension(true);
+    setError('');
+    try {
+      const response = await apiClient.get('/api/v1/users/available-extension');
+      const extension = response.data.data.extension;
+      setAutoExtension(extension);
+      setFormData({ ...formData, extension });
+      setExtensionMode('auto');
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to get available extension');
+      setAutoExtension('');
+    } finally {
+      setIsLoadingExtension(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,31 +292,120 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Extension (Optional)
+                  Extension Assignment
                 </label>
-                <select
-                  value={formData.extension}
-                  onChange={(e) => setFormData({ ...formData, extension: e.target.value })}
-                  className="input"
-                  disabled={!formData.tenant_id}
-                >
-                  <option value="">No Extension</option>
-                  {filteredExtensions.map((ext) => (
-                    <option key={ext.id} value={ext.id}>
-                      {ext.id} - {ext.display_name || 'No Name'}
-                    </option>
-                  ))}
-                </select>
-                {selectedTenant ? (
-                  <p className="mt-1 text-xs text-gray-500">
-                    Your tenant range: {selectedTenant.extension_range_start}-{selectedTenant.extension_range_end} 
-                    {filteredExtensions.length === 0 && (
-                      <span className="text-orange-600"> (No extensions in range - create one first)</span>
+                
+                {/* Extension Mode Toggle */}
+                <div className="flex gap-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExtensionMode('auto');
+                      if (!autoExtension && formData.tenant_id) {
+                        getNextAvailableExtension();
+                      }
+                    }}
+                    className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+                      extensionMode === 'auto'
+                        ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
+                        : 'bg-gray-100 text-gray-700 border-2 border-gray-200 hover:bg-gray-50'
+                    }`}
+                    disabled={!formData.tenant_id || isLoadingExtension}
+                  >
+                    <Zap className="w-4 h-4" />
+                    Auto-Assign
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExtensionMode('manual')}
+                    className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                      extensionMode === 'manual'
+                        ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
+                        : 'bg-gray-100 text-gray-700 border-2 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    Manual Select
+                  </button>
+                </div>
+
+                {/* Auto-Assign Mode */}
+                {extensionMode === 'auto' && (
+                  <div className="space-y-3">
+                    {autoExtension ? (
+                      <div className="bg-green-50 border-2 border-green-200 rounded-md p-4">
+                        <p className="text-sm text-gray-600 mb-2">Assigned Extension:</p>
+                        <p className="text-2xl font-bold text-green-700 mb-2">{autoExtension}</p>
+                        <button
+                          type="button"
+                          onClick={getNextAvailableExtension}
+                          disabled={isLoadingExtension || !formData.tenant_id}
+                          className="text-sm text-gray-600 hover:text-gray-900 underline disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                        >
+                          {isLoadingExtension ? (
+                            <>
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              Getting extension...
+                            </>
+                          ) : (
+                            'Get different extension'
+                          )}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={getNextAvailableExtension}
+                        disabled={isLoadingExtension || !formData.tenant_id}
+                        className="w-full py-2 px-4 bg-blue-50 hover:bg-blue-100 border-2 border-blue-200 rounded-md text-sm font-medium text-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      >
+                        {isLoadingExtension ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Getting next available...
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="w-4 h-4" />
+                            Get Next Available
+                          </>
+                        )}
+                      </button>
                     )}
-                  </p>
-                ) : (
-                  <p className="mt-1 text-xs text-gray-500">
-                    Select a tenant first to see available extensions
+                  </div>
+                )}
+
+                {/* Manual Select Mode */}
+                {extensionMode === 'manual' && (
+                  <div className="space-y-2">
+                    <select
+                      value={formData.extension}
+                      onChange={(e) => setFormData({ ...formData, extension: e.target.value })}
+                      className="input w-full"
+                      disabled={!formData.tenant_id}
+                    >
+                      <option value="">No Extension</option>
+                      {filteredExtensions.map((ext) => (
+                        <option key={ext.id} value={ext.id}>
+                          {ext.id} - {ext.display_name || 'No Name'}
+                        </option>
+                      ))}
+                    </select>
+                    {!formData.tenant_id && (
+                      <p className="text-xs text-orange-600">
+                        Select a tenant first
+                      </p>
+                    )}
+                    {filteredExtensions.length === 0 && formData.tenant_id && (
+                      <p className="text-xs text-orange-600">
+                        No extensions available in range
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {selectedTenant && (
+                  <p className="mt-2 text-xs text-gray-500">
+                    Tenant range: {selectedTenant.extension_range_start}-{selectedTenant.extension_range_end}
                   </p>
                 )}
               </div>

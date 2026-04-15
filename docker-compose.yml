@@ -2,7 +2,9 @@ version: "3.8"
 
 services:
   asterisk:
-    image: call-center-asterisk-runtime:arm64
+    build:
+      context: ./docker/asterisk
+      dockerfile: Dockerfile
     container_name: asterisk
     hostname: asterisk
     cpus: '1.5'

@@ -324,6 +324,7 @@ func main() {
 				users.PUT("/:id", userHandler.Update)
 				users.DELETE("/:id", userHandler.Delete)
 				users.GET("/search", userHandler.Search)
+				users.GET("/available-extension", userHandler.GetNextAvailableExtension)
 				users.PUT("/:id/role", userHandler.UpdateRole)
 				users.POST("/:id/activate", userHandler.Activate)
 				users.POST("/:id/deactivate", userHandler.Deactivate)
