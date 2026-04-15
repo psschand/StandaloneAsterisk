@@ -6,6 +6,16 @@ import { useAuthStore } from '../../store/authStore';
 import { Zap, Loader2 } from 'lucide-react';
 import type { User, UserRole, Tenant } from '../../types';
 
+function getApiErrorMessage(err: any, fallback: string): string {
+  const data = err?.response?.data;
+  return (
+    data?.error?.details ||
+    data?.error?.message ||
+    data?.message ||
+    fallback
+  );
+}
+
 interface UserFormProps {
   user?: User;
   onClose: () => void;
@@ -104,7 +114,7 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
       setAutoExtension(extension);
       setFormData(prev => ({ ...prev, extension }));
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to get available extension - may be no unassigned extensions in range');
+      setError(getApiErrorMessage(err, 'Failed to get available extension - may be no unassigned extensions in range'));
       setAutoExtension('');
     } finally {
       setIsLoadingExtension(false);
@@ -152,7 +162,7 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
       await onSave(userData);
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to save user');
+      setError(getApiErrorMessage(err, 'Failed to save user'));
     } finally {
       setIsSubmitting(false);
     }
