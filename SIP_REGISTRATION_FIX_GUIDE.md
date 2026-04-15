@@ -228,7 +228,7 @@ git rm "docker/asterisk/config/pjsip copy.conf"
 
 ---
 
-## 9. Fix 5 — Web Softphone WebSocket Wrong Port
+## 7. Fix 5 — Web Softphone WebSocket Wrong Port
 
 ### Problem
 
@@ -302,14 +302,14 @@ docker exec caddy wget -S -O/dev/null \
 
 ---
 
-## 8. Fix 6 — TLS Transport Missing Certificate
+## 8. Fix 6 — TLS Transport Missing Certificate → Upgraded to Let's Encrypt
 
 ### Problem
 
 TLS registration on port 5061 failed with SSL handshake errors even though:
-- Port 5061 was open in the firewall (`iptables -S INPUT | grep 5061` → ACCEPT)
+- Port 5061 was open in the firewall
 - `pjsip show transports` showed `transport-tls` as loaded
-- Certificate files existed at `/etc/asterisk/keys/asterisk.crt` and `.key`
+- Certificate files existed at `/etc/asterisk/keys/asterisk.crt`
 
 Inspecting the running transport revealed the certificate fields were **empty**:
 
@@ -319,7 +319,7 @@ docker exec asterisk asterisk -rx "pjsip show transport transport-tls"
   priv_key_file :        ← empty!
 ```
 
-**Root cause: `sorcery.conf` maps transports to the database, not to `pjsip.conf`**
+**Root cause: `sorcery.conf` maps transports to MySQL, not `pjsip.conf`**
 
 ```ini
 # docker/asterisk/config/sorcery.conf
@@ -327,77 +327,79 @@ docker exec asterisk asterisk -rx "pjsip show transport transport-tls"
 transport = realtime,ps_transports   ← transports come from MySQL, NOT pjsip.conf
 ```
 
-The `[transport-tls]` section in `pjsip.conf` is **silently ignored** because Asterisk uses the DB as the authoritative source. The `ps_transports` row for `transport-tls` had `NULL` for both `cert_file` and `priv_key_file`:
+The `[transport-tls]` section in `pjsip.conf` is **silently ignored** — Asterisk uses the DB as authoritative. The `ps_transports` row for `transport-tls` had `NULL` in both cert columns:
 
 ```sql
 SELECT id, protocol, cert_file, priv_key_file FROM ps_transports;
 -- transport-tls  tls  NULL  NULL  ← no cert!
 ```
 
-Asterisk loaded a TLS listener with no certificate → any TLS client negotiation immediately failed.
+### Fix — Two-Stage Resolution
 
-### Certificate Details
-
-The self-signed certificate was pre-generated and present in the container:
-
-```
-Subject: CN=asterisk  (self-signed)
-Issuer:  CN=asterisk
-Valid:   Oct 11, 2025 → Oct 11, 2026
-Files:   /etc/asterisk/keys/asterisk.crt  (certificate)
-         /etc/asterisk/keys/asterisk.key  (private key)
-         /etc/asterisk/keys/asterisk.pem  (combined)
-```
-
-> ⚠️ This is a **self-signed certificate**. SIP clients must be configured to accept self-signed certs:
-> - **Zoiper**: Settings → Advanced → *Allow insecure TLS* or *Accept self-signed*
-> - **Linphone**: Settings → Audio/Security → *Verify TLS certificates* → OFF
-> - **Blink/MicroSIP**: Trust this certificate on first connect
-
-### Fix Applied
+**Stage 1 (migration 074):** Set the self-signed cert that was already in the container.
+This got TLS working but required clients to accept the cert manually:
 
 ```sql
 UPDATE ps_transports
-SET
-    cert_file     = '/etc/asterisk/keys/asterisk.crt',
-    priv_key_file = '/etc/asterisk/keys/asterisk.key',
-    method        = 'default'   -- use best available TLS (not locked to tlsv1)
-WHERE id = 'transport-tls';
+SET cert_file='/etc/asterisk/keys/asterisk.crt',
+    priv_key_file='/etc/asterisk/keys/asterisk.key',
+    method='default'
+WHERE id='transport-tls';
 ```
 
-Persisted in migration `074_fix_pjsip_tls_transport.sql`.
+**Stage 2 (migration 075):** Replaced the self-signed cert with the **valid Let's Encrypt certificate** already managed by Caddy for `app.soham.top`. No more browser/client warnings.
 
-Reloaded without restart:
-```bash
-docker exec asterisk asterisk -rx "module reload res_pjsip.so"
-```
+How it works:
+1. Caddy stores its LE cert in the `caddy_data` Docker volume at:
+   ```
+   caddy_data/caddy/certificates/acme-v02.api.letsencrypt.org-directory/
+       app.soham.top/app.soham.top.{crt,key}
+   ```
+2. `docker-compose.yml`: The `caddy_data` volume is mounted **read-only** into the Asterisk container at `/caddy_certs`
+3. `ps_transports` updated to point at the LE cert path:
+   ```sql
+   UPDATE ps_transports
+   SET
+       cert_file     = '/caddy_certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/app.soham.top/app.soham.top.crt',
+       priv_key_file = '/caddy_certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/app.soham.top/app.soham.top.key',
+       method        = 'sslv23'   -- TLS 1.0 through 1.3 (modern client compatible)
+   WHERE id = 'transport-tls';
+   ```
+4. `docker/asterisk/entrypoint.sh`: Background **cert-watcher** process runs hourly. When Caddy renews the cert (~60 days before expiry), the watcher detects the file change via `md5sum` and automatically runs:
+   ```bash
+   asterisk -rx "module reload res_pjsip.so"
+   ```
+   Zero human intervention required after initial setup.
+
+> **Note**: `transport method` (`sslv23`) is **not hot-reloadable** — it requires a container restart. Only cert file contents can be reloaded via `module reload res_pjsip.so`.
 
 ### Verified State
 
 ```bash
-# Confirm cert is now loaded in the running transport
-docker exec asterisk asterisk -rx "pjsip show transport transport-tls" | grep -E "cert|priv_key"
-# cert_file     : /etc/asterisk/keys/asterisk.crt  ✅
-# priv_key_file : /etc/asterisk/keys/asterisk.key  ✅
+# Confirm LE cert is loaded in the running transport
+docker exec asterisk asterisk -rx "pjsip show transport transport-tls" | grep -E "cert_file|priv_key|method"
+# cert_file     : /caddy_certs/caddy/certificates/.../app.soham.top.crt  ✅
+# priv_key_file : /caddy_certs/caddy/certificates/.../app.soham.top.key  ✅
+# method        : sslv23  ✅
 
-# Confirm TLS handshake completes (TLS 1.2)
+# Confirm entrypoint detected the LE cert at startup
+docker logs asterisk 2>&1 | grep -i "Let.s Encrypt"
+# Let's Encrypt cert found: /caddy_certs/caddy/certificates/.../app.soham.top.crt  ✅
+
+# Confirm TLS handshake completes
 openssl s_client -connect 127.0.0.1:5061 -tls1_2 </dev/null 2>&1 | grep CONNECTED
 # CONNECTED(00000003)  ✅
 ```
 
 **TLS client configuration (Zoiper / Linphone):**
 ```
-Server:     app.soham.top  (or 138.2.68.107)
+Server:     app.soham.top
 Port:       5061
 Transport:  TLS
 Username:   1000
 Password:   agent100pass
-Accept self-signed certificate: YES  (required — not a CA-issued cert)
+# Certificate verification: ON (it's a valid LE cert for app.soham.top)
 ```
-
-> **Future improvement**: Replace the self-signed cert with a Let's Encrypt certificate.  
-> Since `app.soham.top` already has a valid cert managed by Caddy, the same cert can be
-> mounted into the Asterisk container. See the section on certificate management below.
 
 ---
 
@@ -816,10 +818,15 @@ docker exec asterisk asterisk -rx "core show version"
 docker exec asterisk asterisk -rx "pjsip show transports"
 # Expected: transport-udp (5060), transport-tcp (5060), transport-tls (5061), transport-ws (8088)
 
-# 2b. TLS transport has certificate loaded
-docker exec asterisk asterisk -rx "pjsip show transport transport-tls" | grep -E "cert_file|priv_key"
-# Expected: cert_file = /etc/asterisk/keys/asterisk.crt
-#           priv_key_file = /etc/asterisk/keys/asterisk.key
+# 2b. TLS transport has LE certificate loaded
+docker exec asterisk asterisk -rx "pjsip show transport transport-tls" | grep -E "cert_file|priv_key|method"
+# Expected: cert_file     = /caddy_certs/caddy/certificates/.../app.soham.top.crt
+#           priv_key_file = /caddy_certs/caddy/certificates/.../app.soham.top.key
+#           method        = sslv23
+
+# 2c. Entrypoint detected the cert at startup
+docker logs asterisk 2>&1 | grep -i "Let.s Encrypt"
+# Expected: Let's Encrypt cert found: /caddy_certs/caddy/certificates/.../app.soham.top.crt
 
 # 3. Extensions are loaded from database
 docker exec asterisk asterisk -rx "pjsip show endpoints"
@@ -918,6 +925,20 @@ python3 /tmp/test_sip_register.py --user 1004 --password newagentpass
 | `docker/asterisk/config/extconfig.conf` | Added `ps_acl` and `ps_endpoint_acl` table mappings | Asterisk needed these tables registered for ARA |
 | `docker/asterisk/config/pjsip copy.conf` | **Deleted** | Had `match=138.2.68.107` mapping server IP as Twilio |
 | `backend/migrations/073_fix_pjsip_endpoint_acl.sql` | New migration | Clears `deny/permit` columns for all softphone endpoints |
+| `backend/migrations/074_fix_pjsip_tls_transport.sql` | New migration (interim) | Sets self-signed cert paths in `ps_transports` — superseded by 075 |
+| `backend/migrations/075_fix_pjsip_tls_letsencrypt.sql` | New migration | Updates `ps_transports` to LE cert paths + `method=sslv23` |
+| `backend/internal/handler/softphone_handler.go` | Always return WSS/443 | Browser can't use UDP SIP; was building `wss://host:5060/ws` |
+| `docker-compose.yml` | Mount `caddy_data:/caddy_certs:ro` in Asterisk service | Share LE cert from Caddy volume into Asterisk container |
+| `docker/asterisk/entrypoint.sh` | Cert-watcher background + startup LE cert check | Auto-reload PJSIP when Caddy renews the cert (zero-touch renewal) |
+| `/etc/iptables/rules.v4` | SIP/RTP ACCEPT rules inserted before REJECT | Firewall was silently dropping all SIP traffic |
+| MySQL `ps_endpoints` (live) | `deny=NULL, permit=NULL` for all user extensions | Removed Docker-only IP whitelist blocking external registrations |
+| MySQL `ps_transports` (live) | `cert_file`, `priv_key_file`, `method` set for `transport-tls` | Transport had no certificate — TLS handshake failed |
+| MySQL `ps_acl` (live) | Created empty table | Missing table needed by Asterisk extconfig.conf |
+| MySQL `ps_endpoint_acl` (live) | Created empty table | Missing table needed by Asterisk extconfig.conf |
+| `docker/asterisk/config/modules.conf` | Added `res_pjsip_acl.so` to `[noload]` | Module was applying BASELINE ACL denying external IPs |
+| `docker/asterisk/config/extconfig.conf` | Added `ps_acl` and `ps_endpoint_acl` table mappings | Asterisk needed these tables registered for ARA |
+| `docker/asterisk/config/pjsip copy.conf` | **Deleted** | Had `match=138.2.68.107` mapping server IP as Twilio |
+| `backend/migrations/073_fix_pjsip_endpoint_acl.sql` | New migration | Clears `deny/permit` columns for all softphone endpoints |
 | `backend/migrations/074_fix_pjsip_tls_transport.sql` | New migration | Sets `cert_file`/`priv_key_file` in `ps_transports` for TLS |
 | `backend/internal/handler/softphone_handler.go` | Always return WSS/443 | Browser can't use UDP SIP; was building wrong WS URL |
 | `/etc/iptables/rules.v4` | Added SIP/RTP ACCEPT rules before REJECT | Firewall was silently dropping all SIP traffic |
@@ -929,15 +950,30 @@ python3 /tmp/test_sip_register.py --user 1004 --password newagentpass
 ### Git Commits During This Fix Session
 
 ```
+f70d00c Fix: SIP TLS uses Let's Encrypt cert via shared Caddy volume
+         - docker-compose.yml: mount caddy_data into asterisk as /caddy_certs:ro
+         - entrypoint.sh: cert-watcher auto-reloads PJSIP on Caddy renewal
+         - migration 075: LE cert paths + method=sslv23 in ps_transports
+
+7026c89 Fix: TLS transport cert + document web softphone and TLS fixes
+         - migration 074: self-signed cert paths in ps_transports (interim fix)
+         - SIP_REGISTRATION_FIX_GUIDE.md: added Fix 5 (websocket) and Fix 6 (TLS)
+
 069578d Fix: web softphone always returns WSS/443 credentials via Caddy proxy
+         - softphone_handler.go: removed transport-switch block
+
+aa22716 Docs: Add comprehensive SIP registration fix guide with ARA table reference
+
 5c93c70 Fix: Clear PJSIP endpoint deny/permit ACL blocking external SIP clients
+         - migration 073: UPDATE ps_endpoints SET deny=NULL, permit=NULL
+
 e94889d Fix: Complete PJSIP ACL configuration and add testing guide
+
 06c56cc Document: ACL issue diagnosis and fix
+
 8a49c7d Fix: Add missing ps_acl and ps_endpoint_acl tables for PJSIP ACL support
-febad78 Document Linphone native SIP fix: endpoint profile + firewall
-ad397ae Add Linphone SIP configuration guide
-0e0a976 Fix SIP credentials API to return public IP for direct SIP transports
-760810e Enable all SIP transport protocols (UDP/TCP/TLS/WebSocket)
+
+febad78 Document Linphone native SIP fix: endpoint profile + firewall  ← last pushed
 ```
 
 ---
@@ -968,12 +1004,11 @@ Transport:       TCP
 ```
 Port:            5061
 Transport:       TLS
-Accept self-signed certificate: YES   ← required (cert CN=asterisk, not a CA cert)
+Verify certificate: YES  (valid Let's Encrypt cert for app.soham.top — no exception needed)
 (other fields same as UDP)
 ```
 
-> **TLS note**: The certificate is self-signed. Zoiper: Settings → Advanced → "Allow insecure TLS".  
-> Linphone: Preferences → Privacy → "Verify server certificates" → OFF.
+> **TLS note**: The certificate is issued by Let's Encrypt for `app.soham.top` and auto-renews via Caddy. Standard certificate verification should be left **enabled** in the SIP client.
 
 #### Web Softphone (browser — SIP.js)
 ```
