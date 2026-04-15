@@ -3,8 +3,6 @@ package handler
 import (
 	"net/http"
 	"os"
-	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/psschand/callcenter/internal/asterisk"
@@ -145,57 +143,14 @@ func (h *SoftphoneHandler) GetCredentials(c *gin.Context) {
 		password = *auth.Password
 	}
 
+	// The web softphone is a browser-based SIP.js client. Browsers cannot use
+	// raw UDP/TCP SIP — they MUST connect via WebSocket. Caddy proxies:
+	//   wss://app.soham.top/ws  →  ws://asterisk:8088
+	// So we always return WSS/443 credentials regardless of the endpoint's
+	// underlying Asterisk transport (which controls native softphone clients).
 	transport := "WSS"
 	credentialPort := 443
-	proxy := domain // Default proxy for WebRTC (through Caddy/HTTPS)
-
-	if endpoint.Transport != nil {
-		// Map Asterisk transport IDs to client-friendly transport and port.
-		t := strings.ToLower(*endpoint.Transport)
-		switch {
-		case strings.Contains(t, "transport-udp") || strings.HasSuffix(t, "udp"):
-			// UDP: Direct SIP, use SIP server host if specified, else domain
-			transport = "UDP"
-			credentialPort = 5060
-			sipServer := os.Getenv("SOFTPHONE_SIP_HOST")
-			if sipServer == "" {
-				sipServer = domain // Fallback to domain (works if DNS resolves correctly)
-			}
-			proxy = sipServer
-
-		case strings.Contains(t, "transport-tcp") || strings.HasSuffix(t, "tcp"):
-			// TCP: Direct SIP
-			transport = "TCP"
-			credentialPort = 5060
-			sipServer := os.Getenv("SOFTPHONE_SIP_HOST")
-			if sipServer == "" {
-				sipServer = domain
-			}
-			proxy = sipServer
-
-		case strings.Contains(t, "transport-tls") || strings.HasSuffix(t, "tls"):
-			// TLS: Direct SIP on secure port
-			transport = "TLS"
-			credentialPort = 5061
-			sipServer := os.Getenv("SOFTPHONE_SIP_HOST")
-			if sipServer == "" {
-				sipServer = domain
-			}
-			proxy = sipServer
-
-		case strings.Contains(t, "transport-ws") || strings.Contains(t, "transport-wss") || strings.HasSuffix(t, "ws") || strings.HasSuffix(t, "wss"):
-			// WebSocket: Proxied through Caddy/HTTPS
-			transport = "WSS"
-			if portStr := os.Getenv("SOFTPHONE_PROXY_PORT"); portStr != "" {
-				if parsedPort, err := strconv.Atoi(portStr); err == nil {
-					credentialPort = parsedPort
-				}
-			} else {
-				credentialPort = 443 // Default HTTPS port
-			}
-			proxy = domain // Use domain for Caddy proxy
-		}
-	}
+	proxy := domain
 
 	credentials := gin.H{
 		"username":  username, // Use auth username (e.g., "1000")
