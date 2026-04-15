@@ -31,9 +31,11 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
     confirm_password: '',
   });
 
-  const [extensionMode, setExtensionMode] = useState<'auto' | 'manual'>('auto');
+  const [extensionMode, setExtensionMode] = useState<'auto' | 'manual'>('manual');
   const [autoExtension, setAutoExtension] = useState('');
   const [isLoadingExtension, setIsLoadingExtension] = useState(false);
+  const [showCustomInput, setShowCustomInput] = useState(false);
+  const [customExtension, setCustomExtension] = useState('');
 
   // Auto-set tenant for non-superadmin users
   useEffect(() => {
@@ -74,7 +76,7 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
     },
   });
 
-  // Filter extensions by tenant range
+  // Filter extensions by tenant range and get unassigned only
   const filteredExtensions = extensions.filter((ext) => {
     if (!selectedTenant) return true;
     const extNum = parseInt(ext.id);
@@ -95,9 +97,8 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
       const extension = response.data.data.extension;
       setAutoExtension(extension);
       setFormData({ ...formData, extension });
-      setExtensionMode('auto');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to get available extension');
+      setError(err.response?.data?.message || 'Failed to get available extension - may be no unassigned extensions in range');
       setAutoExtension('');
     } finally {
       setIsLoadingExtension(false);
@@ -290,12 +291,13 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
                 </p>
               </div>
 
+              {/* Extension Assignment */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Extension Assignment
+                  Extension (Optional)
                 </label>
-                
-                {/* Extension Mode Toggle */}
+
+                {/* Mode Toggle */}
                 <div className="flex gap-2 mb-3">
                   <button
                     type="button"
@@ -313,7 +315,7 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
                     disabled={!formData.tenant_id || isLoadingExtension}
                   >
                     <Zap className="w-4 h-4" />
-                    Auto-Assign
+                    Auto-Find
                   </button>
                   <button
                     type="button"
@@ -324,32 +326,44 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
                         : 'bg-gray-100 text-gray-700 border-2 border-gray-200 hover:bg-gray-50'
                     }`}
                   >
-                    Manual Select
+                    Manual Entry
                   </button>
                 </div>
 
-                {/* Auto-Assign Mode */}
+                {/* Auto-Find Mode */}
                 {extensionMode === 'auto' && (
                   <div className="space-y-3">
                     {autoExtension ? (
                       <div className="bg-green-50 border-2 border-green-200 rounded-md p-4">
-                        <p className="text-sm text-gray-600 mb-2">Assigned Extension:</p>
-                        <p className="text-2xl font-bold text-green-700 mb-2">{autoExtension}</p>
-                        <button
-                          type="button"
-                          onClick={getNextAvailableExtension}
-                          disabled={isLoadingExtension || !formData.tenant_id}
-                          className="text-sm text-gray-600 hover:text-gray-900 underline disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                        >
-                          {isLoadingExtension ? (
-                            <>
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              Getting extension...
-                            </>
-                          ) : (
-                            'Get different extension'
-                          )}
-                        </button>
+                        <p className="text-sm text-gray-600 mb-2">Available Extension:</p>
+                        <p className="text-2xl font-bold text-green-700 mb-3">{autoExtension}</p>
+                        <div className="flex gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={getNextAvailableExtension}
+                            disabled={isLoadingExtension}
+                            className="text-sm text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                          >
+                            {isLoadingExtension ? (
+                              <>
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                Finding...
+                              </>
+                            ) : (
+                              'Find different'
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAutoExtension('');
+                              setFormData({ ...formData, extension: '' });
+                            }}
+                            className="text-sm text-gray-600 hover:text-gray-800"
+                          >
+                            Skip assignment
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <button
@@ -361,12 +375,12 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
                         {isLoadingExtension ? (
                           <>
                             <Loader2 className="w-4 h-4 animate-spin" />
-                            Getting next available...
+                            Finding next available...
                           </>
                         ) : (
                           <>
                             <Zap className="w-4 h-4" />
-                            Get Next Available
+                            Find Next Available
                           </>
                         )}
                       </button>
@@ -374,31 +388,62 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
                   </div>
                 )}
 
-                {/* Manual Select Mode */}
+                {/* Manual Entry Mode */}
                 {extensionMode === 'manual' && (
                   <div className="space-y-2">
-                    <select
-                      value={formData.extension}
-                      onChange={(e) => setFormData({ ...formData, extension: e.target.value })}
-                      className="input w-full"
-                      disabled={!formData.tenant_id}
-                    >
-                      <option value="">No Extension</option>
-                      {filteredExtensions.map((ext) => (
-                        <option key={ext.id} value={ext.id}>
-                          {ext.id} - {ext.display_name || 'No Name'}
-                        </option>
-                      ))}
-                    </select>
-                    {!formData.tenant_id && (
-                      <p className="text-xs text-orange-600">
-                        Select a tenant first
-                      </p>
+                    {!showCustomInput ? (
+                      <>
+                        <select
+                          value={formData.extension}
+                          onChange={(e) => {
+                            setFormData({ ...formData, extension: e.target.value });
+                            setCustomExtension('');
+                          }}
+                          className="input w-full"
+                          disabled={!formData.tenant_id}
+                        >
+                          <option value="">No Extension</option>
+                          {filteredExtensions.map((ext) => (
+                            <option key={ext.id} value={ext.id}>
+                              {ext.id} - {ext.display_name || 'No Name'}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => setShowCustomInput(true)}
+                          className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                        >
+                          Or enter custom number...
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <input
+                          type="text"
+                          placeholder="e.g., 100"
+                          value={customExtension}
+                          onChange={(e) => {
+                            setCustomExtension(e.target.value);
+                            setFormData({ ...formData, extension: e.target.value });
+                          }}
+                          className="input w-full border-2 border-blue-300"
+                          disabled={!formData.tenant_id}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCustomInput(false);
+                            setCustomExtension('');
+                          }}
+                          className="text-sm text-gray-600 hover:text-gray-800"
+                        >
+                          Back to dropdown
+                        </button>
+                      </>
                     )}
-                    {filteredExtensions.length === 0 && formData.tenant_id && (
-                      <p className="text-xs text-orange-600">
-                        No extensions available in range
-                      </p>
+                    {!formData.tenant_id && (
+                      <p className="text-xs text-orange-600">Select a tenant first</p>
                     )}
                   </div>
                 )}
