@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/psschand/callcenter/internal/asterisk"
@@ -128,20 +129,10 @@ func (h *SoftphoneHandler) GetCredentials(c *gin.Context) {
 			}
 		}
 	} // Build credentials response
-	// Allow deployment to override connection details for WebRTC clients.
+	// Allow deployment to override connection details for WebRTC vs direct SIP clients.
 	domain := os.Getenv("SOFTPHONE_DOMAIN")
 	if domain == "" {
 		domain = "app.soham.top"
-	}
-	proxy := os.Getenv("SOFTPHONE_PROXY_HOST")
-	if proxy == "" {
-		proxy = domain
-	}
-	port := 443
-	if portStr := os.Getenv("SOFTPHONE_PROXY_PORT"); portStr != "" {
-		if parsedPort, err := strconv.Atoi(portStr); err == nil {
-			port = parsedPort
-		}
 	}
 
 	// Dereference pointers for username and password
@@ -154,14 +145,66 @@ func (h *SoftphoneHandler) GetCredentials(c *gin.Context) {
 		password = *auth.Password
 	}
 
+	transport := "WSS"
+	credentialPort := 443
+	proxy := domain // Default proxy for WebRTC (through Caddy/HTTPS)
+
+	if endpoint.Transport != nil {
+		// Map Asterisk transport IDs to client-friendly transport and port.
+		t := strings.ToLower(*endpoint.Transport)
+		switch {
+		case strings.Contains(t, "transport-udp") || strings.HasSuffix(t, "udp"):
+			// UDP: Direct SIP, use SIP server host if specified, else domain
+			transport = "UDP"
+			credentialPort = 5060
+			sipServer := os.Getenv("SOFTPHONE_SIP_HOST")
+			if sipServer == "" {
+				sipServer = domain // Fallback to domain (works if DNS resolves correctly)
+			}
+			proxy = sipServer
+
+		case strings.Contains(t, "transport-tcp") || strings.HasSuffix(t, "tcp"):
+			// TCP: Direct SIP
+			transport = "TCP"
+			credentialPort = 5060
+			sipServer := os.Getenv("SOFTPHONE_SIP_HOST")
+			if sipServer == "" {
+				sipServer = domain
+			}
+			proxy = sipServer
+
+		case strings.Contains(t, "transport-tls") || strings.HasSuffix(t, "tls"):
+			// TLS: Direct SIP on secure port
+			transport = "TLS"
+			credentialPort = 5061
+			sipServer := os.Getenv("SOFTPHONE_SIP_HOST")
+			if sipServer == "" {
+				sipServer = domain
+			}
+			proxy = sipServer
+
+		case strings.Contains(t, "transport-ws") || strings.Contains(t, "transport-wss") || strings.HasSuffix(t, "ws") || strings.HasSuffix(t, "wss"):
+			// WebSocket: Proxied through Caddy/HTTPS
+			transport = "WSS"
+			if portStr := os.Getenv("SOFTPHONE_PROXY_PORT"); portStr != "" {
+				if parsedPort, err := strconv.Atoi(portStr); err == nil {
+					credentialPort = parsedPort
+				}
+			} else {
+				credentialPort = 443 // Default HTTPS port
+			}
+			proxy = domain // Use domain for Caddy proxy
+		}
+	}
+
 	credentials := gin.H{
-		"username":  username, // Use auth username (e.g., "agent101")
-		"password":  password, // Auth password
+		"username":  username, // Use auth username (e.g., "1000")
+		"password":  password, // Auth password (e.g., "agent100pass")
 		"domain":    domain,
-		"proxy":     proxy,
-		"port":      port,
-		"transport": "WSS",       // Use WebSocket Secure (wss://) - Caddy proxies to Asterisk
-		"extension": endpoint.ID, // Extension ID (e.g., "1001")
+		"proxy":     proxy, // Server/proxy address for this transport
+		"port":      credentialPort,
+		"transport": transport,
+		"extension": endpoint.ID, // Extension ID (e.g., "1000")
 	}
 
 	println("[Softphone] Returning credentials - extension:", endpoint.ID, "username:", username)

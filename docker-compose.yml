@@ -162,6 +162,7 @@ services:
       - SOFTPHONE_DOMAIN=app.soham.top
       - SOFTPHONE_PROXY_HOST=app.soham.top
       - SOFTPHONE_PROXY_PORT=443
+      - SOFTPHONE_SIP_HOST=138.2.68.107
       - GEMINI_API_KEY=${GEMINI_API_KEY}
     depends_on:
       mysql:
