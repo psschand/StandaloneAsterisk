@@ -20,6 +20,7 @@ services:
       - asterisk_voicemail:/var/spool/asterisk/voicemail
       - asterisk_sounds:/var/lib/asterisk/sounds
       - asterisk_cdr:/var/log/asterisk/cdr-csv
+      - caddy_data:/caddy_certs:ro  # Let's Encrypt certs from Caddy for SIP TLS
     ports:
       - "5060:5060/udp"
       - "5060:5060/tcp"

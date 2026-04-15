@@ -55,6 +55,34 @@ if [ ! -f /etc/asterisk/keys/asterisk.crt ] || [ ! -f /etc/asterisk/keys/asteris
   echo "TLS certificates generated at /etc/asterisk/keys/"
 fi
 
+# Let's Encrypt cert path (served from caddy_data volume mounted at /caddy_certs)
+LE_CERT=/caddy_certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/app.soham.top/app.soham.top.crt
+LE_KEY=/caddy_certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/app.soham.top/app.soham.top.key
+
+if [ -f "$LE_CERT" ] && [ -f "$LE_KEY" ]; then
+  echo "Let's Encrypt cert found: $LE_CERT"
+else
+  echo "Warning: LE cert not found at $LE_CERT"
+  echo "  SIP TLS will use the self-signed cert; mount caddy_data volume for proper certs"
+fi
+
+# Background: watch LE cert and reload PJSIP when Caddy auto-renews it (runs every hour)
+(
+  PREV_HASH=""
+  while true; do
+    sleep 3600
+    if [ -f "$LE_CERT" ]; then
+      CURR_HASH=$(md5sum "$LE_CERT" | awk '{print $1}')
+      if [ -n "$PREV_HASH" ] && [ "$CURR_HASH" != "$PREV_HASH" ]; then
+        echo "[cert-watcher] LE cert changed -- reloading PJSIP transport..."
+        asterisk -rx "module reload res_pjsip.so" 2>/dev/null || true
+        echo "[cert-watcher] Reload complete"
+      fi
+      PREV_HASH="$CURR_HASH"
+    fi
+  done
+) &
+
 if [ "$#" -eq 0 ]; then
   exec asterisk -f
 else
