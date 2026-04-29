@@ -62,6 +62,8 @@ type UserResponse struct {
 	Timezone      *string            `json:"timezone,omitempty" example:"America/New_York"`
 	Language      *string            `json:"language,omitempty" example:"en"`
 	Roles         []UserRoleResponse `json:"roles,omitempty"`
+	SIPPassword   *string            `json:"sip_password,omitempty" example:"agent100pass"`
+	SIPStatus     string             `json:"sip_status,omitempty" example:"online"`
 	CreatedAt     time.Time          `json:"created_at"`
 	UpdatedAt     time.Time          `json:"updated_at"`
 }

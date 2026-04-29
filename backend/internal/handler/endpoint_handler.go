@@ -40,16 +40,31 @@ func (h *EndpointHandler) ListExtensions(c *gin.Context) {
 		return
 	}
 
+	registeredEndpoints, err := h.endpointRepo.FindRegisteredEndpointIDs(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, dto.ErrorResponse{
+			Code:    "INTERNAL_ERROR",
+			Error:   "Internal error",
+			Message: "Failed to fetch extension registration state",
+		})
+		return
+	}
+
 	// Convert to response format
 	response := make([]map[string]interface{}, len(endpoints))
 	for i, endpoint := range endpoints {
+		status := "offline"
+		if registeredEndpoints[endpoint.ID] {
+			status = "online"
+		}
+
 		response[i] = map[string]interface{}{
 			"id":           endpoint.ID,
 			"display_name": endpoint.Callerid,
 			"context":      endpoint.Context,
 			"codecs":       endpoint.Allow,
 			"transport":    endpoint.Transport,
-			"status":       "offline", // TODO: Get real status from ps_contacts
+			"status":       status,
 		}
 	}
 
@@ -81,6 +96,11 @@ func (h *EndpointHandler) GetExtension(c *gin.Context) {
 		"codecs":       endpoint.Allow,
 		"transport":    endpoint.Transport,
 		"status":       "offline",
+	}
+
+	registeredEndpoints, err := h.endpointRepo.FindRegisteredEndpointIDs(c.Request.Context())
+	if err == nil && registeredEndpoints[endpoint.ID] {
+		response["status"] = "online"
 	}
 
 	c.JSON(http.StatusOK, dto.SuccessResponse{

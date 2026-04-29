@@ -36,6 +36,7 @@ type userService struct {
 	roleRepo     repository.UserRoleRepository
 	tenantRepo   repository.TenantRepository
 	endpointRepo repository.PsEndpointRepository
+	authRepo     repository.PsAuthRepository
 }
 
 // NewUserService creates a new user service
@@ -44,12 +45,14 @@ func NewUserService(
 	roleRepo repository.UserRoleRepository,
 	tenantRepo repository.TenantRepository,
 	endpointRepo repository.PsEndpointRepository,
+	authRepo repository.PsAuthRepository,
 ) UserService {
 	return &userService{
 		userRepo:     userRepo,
 		roleRepo:     roleRepo,
 		tenantRepo:   tenantRepo,
 		endpointRepo: endpointRepo,
+		authRepo:     authRepo,
 	}
 }
 
@@ -194,18 +197,36 @@ func (s *userService) GetByTenant(ctx context.Context, tenantID string, page, pa
 		return nil, 0, errors.Wrap(err, "failed to get users")
 	}
 
+	registeredEndpoints, err := s.endpointRepo.FindRegisteredEndpointIDs(ctx)
+	if err != nil {
+		return nil, 0, errors.Wrap(err, "failed to get registered endpoints")
+	}
+
 	responses := make([]dto.UserResponse, len(users))
 	for i, user := range users {
 		// Get roles for this user in this tenant
 		userRole, _ := s.roleRepo.FindByUserAndTenant(ctx, user.ID, tenantID)
 
 		var roles []dto.UserRoleResponse
+		var sipPassword *string
+		sipStatus := "offline"
 		if userRole != nil {
 			roles = []dto.UserRoleResponse{{
 				TenantID:   userRole.TenantID,
 				Role:       userRole.Role,
 				EndpointID: userRole.Extension,
 			}}
+
+			if userRole.Extension != nil && *userRole.Extension != "" {
+				if registeredEndpoints[*userRole.Extension] {
+					sipStatus = "online"
+				}
+
+				auth, authErr := s.authRepo.FindByEndpoint(ctx, *userRole.Extension)
+				if authErr == nil {
+					sipPassword = auth.Password
+				}
+			}
 		}
 
 		responses[i] = dto.UserResponse{
@@ -220,6 +241,8 @@ func (s *userService) GetByTenant(ctx context.Context, tenantID string, page, pa
 			Timezone:      user.Timezone,
 			Language:      user.Language,
 			Roles:         roles,
+			SIPPassword:   sipPassword,
+			SIPStatus:     sipStatus,
 			CreatedAt:     user.CreatedAt,
 			UpdatedAt:     user.UpdatedAt,
 		}

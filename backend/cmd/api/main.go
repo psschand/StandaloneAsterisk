@@ -164,7 +164,7 @@ func main() {
 	// Initialize services
 	authService := service.NewAuthService(userRepo, tenantRepo, roleRepo, jwtService)
 	tenantService := service.NewTenantService(tenantRepo)
-	userService := service.NewUserService(userRepo, roleRepo, tenantRepo, endpointRepo)
+	userService := service.NewUserService(userRepo, roleRepo, tenantRepo, endpointRepo, authRepo)
 	didService := service.NewDIDService(didRepo, tenantRepo, queueRepo, ivrRepo, userRepo)
 	queueService := service.NewQueueService(queueRepo, queueMemberRepo, tenantRepo, userRepo, roleRepo)
 	ivrService := service.NewIVRService(ivrRepo)

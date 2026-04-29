@@ -13,6 +13,8 @@ export interface User {
   tenant_id?: string;
   status?: string;
   avatar_url?: string;
+  sip_password?: string;
+  sip_status?: 'online' | 'offline';
   roles?: Array<{
     id: number;
     tenant_id: string;

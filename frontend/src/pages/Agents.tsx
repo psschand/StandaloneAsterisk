@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Phone, Mail, Shield, Plus, Edit, Trash2 } from 'lucide-react';
+import { Users, Phone, Mail, Shield, Plus, Edit, Trash2, CheckCircle, XCircle, KeyRound } from 'lucide-react';
 import apiClient from '../lib/api';
 import config from '../config';
 import UserForm from '../components/forms/UserForm';
@@ -213,9 +213,19 @@ export default function Agents() {
                       </div>
                     )}
                     {user.roles?.[0]?.endpoint_id && (
-                      <div className="text-sm text-blue-600 flex items-center mt-1 font-medium">
+                      <div className="text-sm text-blue-600 flex items-center mt-1 font-medium gap-2">
                         <Shield className="w-4 h-4 mr-2" />
                         Ext: {user.roles[0].endpoint_id}
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${user.sip_status === 'online' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'}`}>
+                          {user.sip_status === 'online' ? <CheckCircle className="w-3 h-3 mr-1" /> : <XCircle className="w-3 h-3 mr-1" />}
+                          {user.sip_status || 'offline'}
+                        </span>
+                      </div>
+                    )}
+                    {user.sip_password && (
+                      <div className="text-xs text-amber-700 flex items-center mt-1">
+                        <KeyRound className="w-3 h-3 mr-1" />
+                        SIP password available in edit view
                       </div>
                     )}
                   </td>

@@ -27,9 +27,10 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
   const currentUserRole = currentUser?.role || currentUser?.roles?.[0]?.role;
   const currentUserTenantId = currentUser?.tenant_id || currentUser?.roles?.[0]?.tenant_id || '';
   const isSuperAdmin = currentUserRole === 'superadmin';
+  const canViewPasswords = isSuperAdmin || currentUserRole === 'admin' || currentUserRole === 'tenant_admin';
+  const [showPassword, setShowPassword] = useState(false);
 
   const [formData, setFormData] = useState({
-      const [showPassword, setShowPassword] = useState(false);
     email: user?.email || '',
     first_name: user?.first_name || '',
     last_name: user?.last_name || '',
@@ -509,6 +510,54 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
             </div>
           </div>
 
+          {user?.roles?.[0]?.endpoint_id && user?.sip_password && canViewPasswords && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-medium text-amber-900">Assigned Extension Credentials</h3>
+                  <p className="text-sm text-amber-700 mt-1">
+                    Extension {user.roles[0].endpoint_id} is loaded from ARA (`ps_auths`).
+                  </p>
+                </div>
+                <label className="flex items-center text-xs cursor-pointer select-none text-amber-800">
+                  <input
+                    type="checkbox"
+                    checked={showPassword}
+                    onChange={() => setShowPassword((v) => !v)}
+                    className="mr-2"
+                  />
+                  Show password
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                <div>
+                  <label className="block text-sm font-medium text-amber-900 mb-2">
+                    SIP Username
+                  </label>
+                  <input
+                    type="text"
+                    value={user.roles[0].endpoint_id}
+                    readOnly
+                    className="input bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-amber-900 mb-2">
+                    SIP Password
+                  </label>
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={user.sip_password}
+                    readOnly
+                    className="input bg-white"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Password */}
 
           <div>
@@ -531,7 +580,7 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
                     minLength={8}
                   />
                   {/* Only admins can toggle password visibility */}
-                  {(isSuperAdmin || currentUserRole === 'admin') && (
+                  {canViewPasswords && (
                     <label className="flex items-center text-xs cursor-pointer select-none">
                       <input
                         type="checkbox"

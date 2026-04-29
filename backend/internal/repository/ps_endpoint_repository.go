@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/psschand/callcenter/internal/asterisk"
 	"gorm.io/gorm"
@@ -17,6 +18,7 @@ type PsEndpointRepository interface {
 	FindWithAuthAndAor(ctx context.Context, id string) (*asterisk.PsEndpoint, error)
 	FindUnassigned(ctx context.Context, tenantID string, extStart, extEnd int) ([]asterisk.PsEndpoint, error)
 	FindByIDRange(ctx context.Context, extStart, extEnd int) ([]asterisk.PsEndpoint, error)
+	FindRegisteredEndpointIDs(ctx context.Context) (map[string]bool, error)
 }
 
 // psEndpointRepository implements PsEndpointRepository
@@ -112,4 +114,27 @@ func (r *psEndpointRepository) FindUnassigned(ctx context.Context, tenantID stri
 	var endpoints []asterisk.PsEndpoint
 	err := query.Find(&endpoints).Error
 	return endpoints, err
+}
+
+// FindRegisteredEndpointIDs returns endpoint IDs with at least one non-expired contact in ps_contacts.
+func (r *psEndpointRepository) FindRegisteredEndpointIDs(ctx context.Context) (map[string]bool, error) {
+	var endpointIDs []string
+	now := time.Now().Unix()
+
+	err := r.db.WithContext(ctx).
+		Table("ps_contacts").
+		Distinct("endpoint").
+		Where("endpoint IS NOT NULL AND endpoint <> ''").
+		Where("expiration_time IS NULL OR expiration_time > ?", now).
+		Pluck("endpoint", &endpointIDs).Error
+	if err != nil {
+		return nil, err
+	}
+
+	registered := make(map[string]bool, len(endpointIDs))
+	for _, endpointID := range endpointIDs {
+		registered[endpointID] = true
+	}
+
+	return registered, nil
 }
