@@ -29,6 +29,7 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
   const isSuperAdmin = currentUserRole === 'superadmin';
 
   const [formData, setFormData] = useState({
+      const [showPassword, setShowPassword] = useState(false);
     email: user?.email || '',
     first_name: user?.first_name || '',
     last_name: user?.last_name || '',
@@ -509,6 +510,7 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
           </div>
 
           {/* Password */}
+
           <div>
             <h3 className="text-lg font-medium text-gray-900 mb-4">
               {user ? 'Change Password (Optional)' : 'Set Password'}
@@ -518,15 +520,29 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Password {!user && '*'}
                 </label>
-                <input
-                  type="password"
-                  required={!user}
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="input"
-                  placeholder="Min 8 characters"
-                  minLength={8}
-                />
+                <div className="flex items-center space-x-2">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required={!user}
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    className="input"
+                    placeholder="Min 8 characters"
+                    minLength={8}
+                  />
+                  {/* Only admins can toggle password visibility */}
+                  {(isSuperAdmin || currentUserRole === 'admin') && (
+                    <label className="flex items-center text-xs cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={showPassword}
+                        onChange={() => setShowPassword((v) => !v)}
+                        className="mr-1"
+                      />
+                      Show
+                    </label>
+                  )}
+                </div>
               </div>
 
               <div>
@@ -534,7 +550,7 @@ export default function UserForm({ user, onClose, onSave }: UserFormProps) {
                   Confirm Password {!user && '*'}
                 </label>
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required={!user && !!formData.password}
                   value={formData.confirm_password}
                   onChange={(e) => setFormData({ ...formData, confirm_password: e.target.value })}
