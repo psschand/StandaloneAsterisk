@@ -22,6 +22,12 @@ interface Extension {
   codecs?: string;
   max_contacts?: number;
   status?: string;
+  assigned_user?: {
+    id: number;
+    email: string;
+    name: string;
+    role: string;
+  } | null;
 }
 
 interface ExtensionFormData {
@@ -362,6 +368,9 @@ export default function Extensions() {
                 Display Name
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Assigned Agent
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Context
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -378,7 +387,7 @@ export default function Extensions() {
           <tbody className="bg-white divide-y divide-gray-200">
             {filteredExtensions.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
                   {searchTerm ? 'No extensions found matching your search' : 'No extensions yet. Create your first extension to get started.'}
                 </td>
               </tr>
@@ -395,6 +404,16 @@ export default function Extensions() {
                     <div>
                       <div className="font-medium text-gray-900">{extension.display_name || '-'}</div>
                     </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    {extension.assigned_user ? (
+                      <div>
+                        <div className="text-sm font-medium text-gray-900">{extension.assigned_user.name || '-'}</div>
+                        <div className="text-xs text-gray-500">{extension.assigned_user.email}</div>
+                      </div>
+                    ) : (
+                      <span className="text-sm text-gray-400">Unassigned</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-gray-600">
                     {extension.context || 'internal'}

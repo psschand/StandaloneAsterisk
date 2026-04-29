@@ -15,20 +15,32 @@ type EndpointHandler struct {
 	authRepo         repository.PsAuthRepository
 	aorRepo          repository.PsAorRepository
 	endpointIdIpRepo repository.PsEndpointIdIpRepository
+	userRepo         repository.UserRepository
+	roleRepo         repository.UserRoleRepository
 }
 
 // NewEndpointHandler creates a new endpoint handler
-func NewEndpointHandler(endpointRepo repository.PsEndpointRepository, authRepo repository.PsAuthRepository, aorRepo repository.PsAorRepository, endpointIdIpRepo repository.PsEndpointIdIpRepository) *EndpointHandler {
+func NewEndpointHandler(
+	endpointRepo repository.PsEndpointRepository,
+	authRepo repository.PsAuthRepository,
+	aorRepo repository.PsAorRepository,
+	endpointIdIpRepo repository.PsEndpointIdIpRepository,
+	userRepo repository.UserRepository,
+	roleRepo repository.UserRoleRepository,
+) *EndpointHandler {
 	return &EndpointHandler{
 		endpointRepo:     endpointRepo,
 		authRepo:         authRepo,
 		aorRepo:          aorRepo,
 		endpointIdIpRepo: endpointIdIpRepo,
+		userRepo:         userRepo,
+		roleRepo:         roleRepo,
 	}
 }
 
 // ListExtensions lists all extensions (ignores tenant)
 func (h *EndpointHandler) ListExtensions(c *gin.Context) {
+	tenantID := c.GetString("tenant_id")
 	// NOTE: ps_endpoints table does not have tenant_id, so fetch all endpoints
 	endpoints, err := h.endpointRepo.FindByTenant(c.Request.Context(), "")
 	if err != nil {
@@ -58,13 +70,44 @@ func (h *EndpointHandler) ListExtensions(c *gin.Context) {
 			status = "online"
 		}
 
+		var assignedUser map[string]interface{}
+		displayName := endpoint.Callerid
+		if tenantID != "" {
+			role, roleErr := h.roleRepo.FindByTenantAndExtension(c.Request.Context(), tenantID, endpoint.ID)
+			if roleErr == nil {
+				user, userErr := h.userRepo.FindByID(c.Request.Context(), role.UserID)
+				if userErr == nil {
+					fullName := ""
+					if user.FirstName != nil {
+						fullName += *user.FirstName
+					}
+					if user.LastName != nil {
+						if fullName != "" {
+							fullName += " "
+						}
+						fullName += *user.LastName
+					}
+					if displayName == nil || *displayName == "" {
+						displayName = &fullName
+					}
+					assignedUser = map[string]interface{}{
+						"id":    user.ID,
+						"email": user.Email,
+						"name":  fullName,
+						"role":  role.Role,
+					}
+				}
+			}
+		}
+
 		response[i] = map[string]interface{}{
-			"id":           endpoint.ID,
-			"display_name": endpoint.Callerid,
-			"context":      endpoint.Context,
-			"codecs":       endpoint.Allow,
-			"transport":    endpoint.Transport,
-			"status":       status,
+			"id":            endpoint.ID,
+			"display_name":  displayName,
+			"context":       endpoint.Context,
+			"codecs":        endpoint.Allow,
+			"transport":     endpoint.Transport,
+			"status":        status,
+			"assigned_user": assignedUser,
 		}
 	}
 
@@ -78,6 +121,7 @@ func (h *EndpointHandler) ListExtensions(c *gin.Context) {
 // GetExtension gets a specific extension by ID
 func (h *EndpointHandler) GetExtension(c *gin.Context) {
 	id := c.Param("id")
+	tenantID := c.GetString("tenant_id")
 
 	endpoint, err := h.endpointRepo.FindByID(c.Request.Context(), id)
 	if err != nil {
@@ -89,13 +133,44 @@ func (h *EndpointHandler) GetExtension(c *gin.Context) {
 		return
 	}
 
+	var assignedUser map[string]interface{}
+	displayName := endpoint.Callerid
+	if tenantID != "" {
+		role, roleErr := h.roleRepo.FindByTenantAndExtension(c.Request.Context(), tenantID, endpoint.ID)
+		if roleErr == nil {
+			user, userErr := h.userRepo.FindByID(c.Request.Context(), role.UserID)
+			if userErr == nil {
+				fullName := ""
+				if user.FirstName != nil {
+					fullName += *user.FirstName
+				}
+				if user.LastName != nil {
+					if fullName != "" {
+						fullName += " "
+					}
+					fullName += *user.LastName
+				}
+				if displayName == nil || *displayName == "" {
+					displayName = &fullName
+				}
+				assignedUser = map[string]interface{}{
+					"id":    user.ID,
+					"email": user.Email,
+					"name":  fullName,
+					"role":  role.Role,
+				}
+			}
+		}
+	}
+
 	response := map[string]interface{}{
-		"id":           endpoint.ID,
-		"display_name": endpoint.Callerid,
-		"context":      endpoint.Context,
-		"codecs":       endpoint.Allow,
-		"transport":    endpoint.Transport,
-		"status":       "offline",
+		"id":            endpoint.ID,
+		"display_name":  displayName,
+		"context":       endpoint.Context,
+		"codecs":        endpoint.Allow,
+		"transport":     endpoint.Transport,
+		"status":        "offline",
+		"assigned_user": assignedUser,
 	}
 
 	registeredEndpoints, err := h.endpointRepo.FindRegisteredEndpointIDs(c.Request.Context())

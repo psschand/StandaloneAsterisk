@@ -210,7 +210,7 @@ func main() {
 	callAPIHandler := handler.NewCallHandler(ariClient)
 	softphoneHandler := handler.NewSoftphoneHandler(endpointRepo, authRepo, userRepo, roleRepo)
 	endpointIdIpRepo := repository.NewPsEndpointIdIpRepository(db)
-	endpointHandler := handler.NewEndpointHandler(endpointRepo, authRepo, aorRepo, endpointIdIpRepo)
+	endpointHandler := handler.NewEndpointHandler(endpointRepo, authRepo, aorRepo, endpointIdIpRepo, userRepo, roleRepo)
 	trunkHandler := handler.NewTrunkHandler(endpointRepo, authRepo, aorRepo)
 	outboundRouteHandler := handler.NewOutboundRouteHandler(outboundRouteService)
 	securityHandler := handler.NewSecurityHandler()
